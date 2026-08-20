@@ -12,38 +12,42 @@ pipeline {
     stages {
 
         stage('Build') {
-            steps {
-                echo 'Build stage'
+            parallel {
 
-                sh '''
-                    echo "Application Name: ${APP_NAME}" > ${BUILD_INFO_FILE}
-                    echo "Jenkins Build Number: ${BUILD_NUMBER}" >> ${BUILD_INFO_FILE}
-                    echo "Current Date: $(date)" >> ${BUILD_INFO_FILE}
-                '''
+                stage('Build files') {
+                    steps {
+                        echo 'Build stage'
 
-                parallel {
+                        sh 'echo "Hello from Jenkins" > app.txt'
 
-                    stage('File stage') {
-                        steps {
-                            echo 'File stage'
-
-                            sh '''
-                                if [ -f app.txt ]; then
-                                    echo "PASS: app.txt exists"
-                                else
-                                    echo "FAIL: app.txt does not exist"
-                                    exit 1
-                                fi
-                            '''
-                        }
+                        sh '''
+                            echo "Application Name: ${APP_NAME}" > ${BUILD_INFO_FILE}
+                            echo "Jenkins Build Number: ${BUILD_NUMBER}" >> ${BUILD_INFO_FILE}
+                            echo "Current Date: $(date)" >> ${BUILD_INFO_FILE}
+                        '''
                     }
+                }
 
-                    stage('Build info Stage') {
-                        steps {
-                            echo 'Build info Stage'
+                stage('File stage') {
+                    steps {
+                        echo 'File stage'
 
-                            sh 'python3 build_info_test.py'
-                        }
+                        sh '''
+                            if [ -f app.txt ]; then
+                                echo "PASS: app.txt exists"
+                            else
+                                echo "FAIL: app.txt does not exist"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+
+                stage('Build info Stage') {
+                    steps {
+                        echo 'Build info Stage'
+
+                        sh 'python3 build_info_test.py'
                     }
                 }
             }
@@ -78,4 +82,3 @@ pipeline {
         }
     }
 }
-
