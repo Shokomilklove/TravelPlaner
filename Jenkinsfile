@@ -12,21 +12,21 @@ pipeline {
     stages {
 
         stage('Build') {
+            steps {
+                echo 'Build stage'
+
+                sh 'echo "Hello from Jenkins" > app.txt'
+
+                sh '''
+                    echo "Application Name: ${APP_NAME}" > ${BUILD_INFO_FILE}
+                    echo "Jenkins Build Number: ${BUILD_NUMBER}" >> ${BUILD_INFO_FILE}
+                    echo "Current Date: $(date)" >> ${BUILD_INFO_FILE}
+                '''
+            }
+        }
+
+        stage('Test') {
             parallel {
-
-                stage('Build files') {
-                    steps {
-                        echo 'Build stage'
-
-                        sh 'echo "Hello from Jenkins" > app.txt'
-
-                        sh '''
-                            echo "Application Name: ${APP_NAME}" > ${BUILD_INFO_FILE}
-                            echo "Jenkins Build Number: ${BUILD_NUMBER}" >> ${BUILD_INFO_FILE}
-                            echo "Current Date: $(date)" >> ${BUILD_INFO_FILE}
-                        '''
-                    }
-                }
 
                 stage('File stage') {
                     steps {
@@ -50,17 +50,6 @@ pipeline {
                         sh 'python3 build_info_test.py'
                     }
                 }
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo 'Test stage'
-
-                echo "Pipeline name: ${env.JOB_NAME}"
-                echo "Build number: ${env.BUILD_NUMBER}"
-
-                sh 'test -f app.txt'
             }
         }
 
