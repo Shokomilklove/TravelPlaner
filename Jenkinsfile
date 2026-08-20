@@ -1,11 +1,13 @@
+```groovy
 pipeline {
     agent any
 
     environment {
         APP_VERSION = '1.0'
-        APP_NAME = 'travel-planner'
-        DOCKER_REPO = 'travel-planner'
-        FILE_TO_TEST = 'app.txt'
+        APP_NAME = 'my-app'
+        DOCKER_REPO = 'my-docker-repo'
+
+        BUILD_INFO_FILE = 'build-info.txt'
     }
 
     stages {
@@ -14,9 +16,37 @@ pipeline {
             steps {
                 echo 'Build stage'
 
-                echo "Building ${APP_NAME} version ${APP_VERSION} from Docker repository ${DOCKER_REPO}"
+                sh '''
+                    echo "Application Name: ${APP_NAME}" > ${BUILD_INFO_FILE}
+                    echo "Jenkins Build Number: ${BUILD_NUMBER}" >> ${BUILD_INFO_FILE}
+                    echo "Current Date: $(date)" >> ${BUILD_INFO_FILE}
+                '''
 
-                sh 'echo "Travel Planner application" > app.txt'
+                parallel {
+
+                    stage('File stage') {
+                        steps {
+                            echo 'File stage'
+
+                            sh '''
+                                if [ -f app.txt ]; then
+                                    echo "PASS: app.txt exists"
+                                else
+                                    echo "FAIL: app.txt does not exist"
+                                    exit 1
+                                fi
+                            '''
+                        }
+                    }
+
+                    stage('Build info Stage') {
+                        steps {
+                            echo 'Build info Stage'
+
+                            sh 'python3 build_info_test.py'
+                        }
+                    }
+                }
             }
         }
 
@@ -27,7 +57,7 @@ pipeline {
                 echo "Pipeline name: ${env.JOB_NAME}"
                 echo "Build number: ${env.BUILD_NUMBER}"
 
-                sh 'python3 search_word.py "Travel"'
+                sh 'test -f app.txt'
             }
         }
 
@@ -35,8 +65,10 @@ pipeline {
             steps {
                 echo 'Deploy stage'
 
-                sh 'mkdir -p deploy'
-                sh 'cp app.txt deploy/'
+                sh '''
+                    mkdir -p deploy
+                    cp app.txt deploy/
+                '''
             }
         }
     }
@@ -46,4 +78,7 @@ pipeline {
             deleteDir()
         }
     }
+}
+```
+
 }
