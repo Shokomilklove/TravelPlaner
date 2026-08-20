@@ -1,0 +1,124 @@
+name: travel-planner
+
+# One-command local/dev orchestration:
+#   cp env.example .env   # then edit secrets / AI provider
+#   docker compose up --build
+#
+# Ports published on the host:
+#   Frontend (nginx)     -> http://localhost:8080
+#   Trip Service (A)     -> http://localhost:5001
+#   AI Planner (B)       -> http://localhost:5002
+#   PostgreSQL           -> localhost:5432
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  trip-service:
+    build: ./services/trip-service
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      PORT: 5001
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ACCESS_TOKEN_EXPIRES: ${JWT_ACCESS_TOKEN_EXPIRES:-86400}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      AI_PLANNER_URL: http://ai-planner-service:5002
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',5001)); s.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    networks:
+      - travel-network
+
+  ai-planner-service:
+    build: ./services/ai-planner-service
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      PORT: 5002
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
+      AI_TIMEOUT: ${AI_TIMEOUT:-90}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+    # Lets the container reach an Ollama server running on the host machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5002:5002"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',5002)); s.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    networks:
+      - travel-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Empty => the SPA calls the same origin; nginx proxies /api to
+        # the Trip Service.
+        VITE_TRIP_SERVICE_URL: ${VITE_TRIP_SERVICE_URL:-}
+    depends_on:
+      - trip-service
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+    networks:
+      - travel-network
+
+volumes:
+  pgdata:
+    name: travel-planner-pgdata
+    
+networks:
+  travel-network:
+    name: travel-planner-network
+    driver: bridge

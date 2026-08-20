@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trip-service-config
+  labels:
+    {{- include "tp.labels" . | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.appEnv | quote }}
+  PORT: {{ .Values.tripService.port | quote }}
+  LOG_LEVEL: {{ .Values.logLevel | quote }}
+  CORS_ORIGINS: {{ .Values.tripService.corsOrigins | quote }}
+  RUN_MIGRATIONS: {{ .Values.tripService.runMigrations | quote }}
+  PROMETHEUS_MULTIPROC_DIR: {{ .Values.tripService.prometheusMultiprocDir | quote }}
+  AI_PLANNER_URL: {{ .Values.aiPlanner.url | quote }}
+  AI_PLANNER_TIMEOUT: {{ .Values.aiPlanner.timeout | quote }}

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: travel-planner
+description: >-
+  Travel Planner — Service A (React frontend + Trip Service) with an optional
+  in-cluster PostgreSQL. Service B (AI Planner) runs OUTSIDE the cluster
+  (local machine + Ollama) and is reached over a secure tunnel/VPN.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords: [travel, flask, react, microservices]
+maintainers:
+  - name: Travel Planner

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+instance/
+
+# Node
+node_modules/
+dist/
+
+# Environment / secrets (keep env.example)
+.env
+*.env
+!env.example
+
+# Prometheus multiprocess metrics
+prometheus_multiproc/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

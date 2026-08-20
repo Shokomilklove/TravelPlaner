@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 712" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6675"/></marker>
+  </defs>
+  <style>
+    .title{fill:#1f2733;font-size:17px;font-weight:700}
+    .st{fill:#1f2733;font-size:12.5px;font-weight:700;text-anchor:middle}
+    .sub{fill:#6b7686;font-size:10px;text-anchor:middle}
+    .gt{fill:#8a5a00;font-size:12px;font-weight:700;text-anchor:middle}
+    .flow{stroke:#5b6675;stroke-width:2;fill:none}
+  </style>
+  <rect width="540" height="712" fill="#ffffff"/>
+  <text x="26" y="30" class="title">CI/CD Pipeline — 7 stages</text>
+
+  <!-- connectors -->
+  <path class="flow" d="M270,104 V120" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,180 V196" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,256 V272" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,332 V348" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,418 V434" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,494 V510" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,580 V596" marker-end="url(#arrow)"/>
+  <path class="flow" d="M270,636 V652" marker-end="url(#arrow)"/>
+
+  <!-- 1 -->
+  <rect x="90" y="48" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="72" class="st">1 · Static analysis + security scan</text>
+  <text x="270" y="90" class="sub">ruff · bandit · eslint · gitleaks · pip/npm audit</text>
+  <!-- 2 -->
+  <rect x="90" y="124" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="148" class="st">2 · Build &amp; test each service</text>
+  <text x="270" y="166" class="sub">pytest (trip-service, ai-planner) · npm test + build</text>
+  <!-- 3 -->
+  <rect x="90" y="200" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="224" class="st">3 · Build image + Trivy scan + push</text>
+  <text x="270" y="242" class="sub">tag NAME:semver-sha → registry (block HIGH/CRIT)</text>
+  <!-- 4 -->
+  <rect x="90" y="276" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="300" class="st">4 · Deploy to dev + integration tests</text>
+  <text x="270" y="318" class="sub">helm upgrade -n travel-dev</text>
+  <!-- gate 1 -->
+  <polygon points="270,348 396,376 270,404 144,376" fill="#fbf3e6" stroke="#d9a400" stroke-width="1.5"/>
+  <text x="270" y="381" class="gt">Approval gate</text>
+  <!-- 5 -->
+  <rect x="90" y="434" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="458" class="st">5 · Deploy to staging</text>
+  <text x="270" y="476" class="sub">helm upgrade -n travel-staging</text>
+  <!-- 6 -->
+  <rect x="90" y="510" width="360" height="56" rx="9" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="270" y="534" class="st">6 · Performance testing</text>
+  <text x="270" y="552" class="sub">k6 / Locust vs staging · assert p95 + error rate</text>
+  <!-- gate 2 -->
+  <polygon points="270,596 396,624 270,652 144,624" fill="#fbf3e6" stroke="#d9a400" stroke-width="1.5"/>
+  <text x="270" y="629" class="gt">Approval gate</text>
+  <!-- 7 -->
+  <rect x="90" y="652" width="360" height="56" rx="9" fill="#e7f8ee" stroke="#1f9d55" stroke-width="1.5"/>
+  <text x="270" y="676" class="st">7 · Blue/Green deploy to production</text>
+  <text x="270" y="694" class="sub">Argo Rollouts or blue/green Helm releases</text>
+</svg>

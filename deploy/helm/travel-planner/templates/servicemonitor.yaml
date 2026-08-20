@@ -1,0 +1,17 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trip-service
+  labels:
+    release: {{ .Values.serviceMonitor.release }}
+    {{- include "tp.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: trip-service
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}

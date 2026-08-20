@@ -1,0 +1,50 @@
+# Production overrides — managed database (RDS), HA, autoscaling.
+appEnv: production
+
+image:
+  registry: ""            # set to your ECR
+  tag: "1.0.0"
+
+tripService:
+  replicas: 3
+  corsOrigins: "https://travelplanner.example.com"
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  replicas: 3
+
+aiPlanner:
+  url: "https://ai.travelplanner.example.com"   # NAMED cloudflare tunnel + Access
+
+# Use managed PostgreSQL (RDS) in production.
+postgres:
+  enabled: false
+externalDatabase:
+  url: "postgresql+psycopg2://travel:CHANGE_ME@travel-prod.xxxx.eu-west-1.rds.amazonaws.com:5432/travel"
+
+ingress:
+  enabled: true
+  host: travelplanner.example.com
+  tls:
+    enabled: true
+    secretName: travel-tls-prod
+    clusterIssuer: letsencrypt-prod
+
+# For real prod, prefer secrets.create=false + existingSecret from your secrets manager
+# (External Secrets Operator / Sealed Secrets). Values shown for completeness.
+secrets:
+  create: true
+  secretKey: "CHANGE_ME_prod_flask"
+  jwtSecretKey: "CHANGE_ME_prod_jwt"
+  internalApiToken: "CHANGE_ME_matches_service_B"
+
+serviceMonitor:
+  enabled: true
+  release: kps
+
+networkPolicy:
+  enabled: true

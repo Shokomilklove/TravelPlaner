@@ -1,0 +1,32 @@
+Travel Planner ({{ .Values.appEnv }}) deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Service A is in the cluster:
+  - frontend   (Service: frontend:{{ .Values.frontend.port }})
+  - trip-service (Service: trip-service:{{ .Values.tripService.port }})
+{{- if .Values.postgres.enabled }}
+  - postgres   (in-cluster StatefulSet)
+{{- else }}
+  - database   external: {{ .Values.externalDatabase.url | default "(set externalDatabase.url or existingSecret)" }}
+{{- end }}
+
+Service B (ai-planner) runs OUTSIDE the cluster. trip-service calls it at:
+  AI_PLANNER_URL = {{ .Values.aiPlanner.url }}
+Make sure that endpoint is reachable and INTERNAL_API_TOKEN matches Service B.
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/trip-service
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/frontend
+  kubectl -n {{ .Release.Namespace }} get pods
+
+{{- if .Values.ingress.enabled }}
+
+Open the app:
+  https://{{ .Values.ingress.host }}
+Point DNS for {{ .Values.ingress.host }} at the ingress-nginx LoadBalancer:
+  kubectl -n ingress-nginx get svc ingress-nginx-controller
+{{- else }}
+
+Ingress is disabled. Reach the app with a port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/frontend 8080:{{ .Values.frontend.port }}
+  # then open http://localhost:8080
+{{- end }}

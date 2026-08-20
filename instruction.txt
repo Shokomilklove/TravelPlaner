@@ -1,0 +1,406 @@
+===============================================================================
+ TRAVEL PLANNER — DEVOPS SETUP INSTRUCTIONS (STAGING & PRODUCTION)
+===============================================================================
+ Goal: stand up the full platform for two environments (travel-staging,
+       travel-prod). SERVICE A (frontend + trip-service + RDS) runs on Kubernetes
+       in AWS — Terraform infra, Helm deploys, Prometheus/Grafana/Alertmanager,
+       ELK/Loki. SERVICE B (ai-planner) runs on YOUR LOCAL MACHINE with a local
+       Ollama, reached from AWS over a secure tunnel/VPN — the A<->B link (PHASE 5b).
+
+ Read alongside:
+   - DEVOPS_ARCHITECTURE.md  (the target diagram & component map)
+   - forDevOps.txt           (env-var tables, metrics list, ports, security)
+
+ Conventions used below (replace with your values):
+   <REGISTRY>     e.g. 123456789.dkr.ecr.eu-west-1.amazonaws.com/travel-planner
+   <TAG>          image tag, e.g. 1.0.0-<git-sha>   (NEVER use "latest" in prod)
+   <STG_DOMAIN>   e.g. staging.travelplanner.example.com
+   <PROD_DOMAIN>  e.g. travelplanner.example.com
+   Ports (AWS):    frontend 80 | trip-service 5001 | postgres 5432
+   Ports (local):  ai-planner 5002 | Ollama 11434   (Service B on your machine)
+   <TUNNEL_URL>    HTTPS endpoint of your local ai-planner (e.g. Cloudflare Tunnel)
+
+===============================================================================
+ PHASE 0 — PREREQUISITES
+===============================================================================
+ Tools (local workstation / CI runner):
+   docker, kubectl, helm (v3), terraform (>=1.5), git,
+   cloud CLI (aws / gcloud / az), trivy (image scanning), k6 or locust (perf).
+
+ Accounts / access:
+   - Cloud account with permissions to create VPC, K8s, managed Postgres, registry.
+   - A DNS zone you control (for <STG_DOMAIN> / <PROD_DOMAIN>).
+   - Your LOCAL machine running Ollama (ollama serve; ollama pull llama3.1) and the
+     ai-planner service, plus a tunnel tool (cloudflared / ngrok / WireGuard) to
+     expose it to AWS. See PHASE 5b and DEVOPS_ARCHITECTURE.md §2b.
+
+ Repositories (create these three — see DEVOPS_ARCHITECTURE.md §9):
+   travel-planner        (this app repo)
+   travel-planner-infra  (Terraform + Helm chart + K8s manifests)
+   travel-planner-cicd   (pipeline definitions + integration/perf tests)
+
+ Do staging FIRST end-to-end, validate, THEN repeat for prod.
+
+===============================================================================
+ PHASE 1 — PROVISION INFRASTRUCTURE WITH TERRAFORM  (per environment)
+===============================================================================
+ In travel-planner-infra/terraform/
+
+ 1.1 Configure a REMOTE STATE backend with locking (backend.tf), e.g. AWS:
+     terraform {
+       backend "s3" {
+         bucket         = "travelplanner-tfstate"
+         key            = "staging/terraform.tfstate"   # prod uses prod/...
+         region         = "eu-west-1"
+         dynamodb_table = "travelplanner-tflock"        # state locking
+         encrypt        = true
+       }
+     }
+     (GCS: backend "gcs"; Azure: backend "azurerm" — equivalent.)
+
+ 1.2 Provision, per environment, via modules (network, cluster, database, registry):
+     - network:  VPC, public + PRIVATE subnets, security groups.
+                 * DB SG: inbound 5432 ONLY from the cluster node SG.
+                 * Nodes in private subnets; only the LB is public.
+     - cluster:  managed Kubernetes (EKS / GKE / AKS) + a node pool.
+     - database: managed PostgreSQL 16 (RDS / Cloud SQL / Azure DB), backups on,
+                 one instance for staging, a separate HA instance for prod.
+     - registry: ECR / GAR / ACR.
+
+ 1.3 Apply per environment (keep staging and prod state separate):
+     cd terraform/envs/staging && terraform init && terraform apply
+     cd terraform/envs/prod    && terraform init && terraform apply
+
+ 1.4 Capture outputs you will need: cluster name, DB host/port/db/user, registry URL.
+
+===============================================================================
+ PHASE 2 — CLUSTER BOOTSTRAP  (shared platform add-ons; once per cluster)
+===============================================================================
+ 2.1 Point kubectl at the cluster (example EKS):
+     aws eks update-kubeconfig --name <cluster> --region <region>
+     kubectl get nodes                      # confirm nodes are Ready
+
+ 2.2 Ingress controller + TLS:
+     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+     helm repo add jetstack https://charts.jetstack.io
+     helm repo update
+     helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+       -n ingress-nginx --create-namespace
+     helm upgrade --install cert-manager jetstack/cert-manager \
+       -n cert-manager --create-namespace --set crds.enabled=true
+     # Then create a ClusterIssuer (Let's Encrypt) — see PHASE 8 notes.
+
+ 2.3 Monitoring stack (Prometheus + Grafana + Alertmanager):
+     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+     helm repo update
+     helm upgrade --install kube-prometheus-stack \
+       prometheus-community/kube-prometheus-stack \
+       -n monitoring --create-namespace
+     # This bundles Prometheus Operator (enables ServiceMonitor CRDs used later).
+
+ 2.4 Logging stack — pick ONE:
+     # Option A (Loki + Promtail, lighter; view in Grafana):
+     helm repo add grafana https://grafana.github.io/helm-charts
+     helm upgrade --install loki grafana/loki-stack \
+       -n logging --create-namespace --set promtail.enabled=true
+     # Option B (ELK): deploy Elastic Cloud on K8s (ECK) + Filebeat/Fluent Bit + Kibana.
+
+===============================================================================
+ PHASE 3 — NAMESPACES, CONFIG & SECRETS  (per environment)
+===============================================================================
+ 3.1 Create the environment namespaces (isolation requirement):
+     kubectl create namespace travel-staging
+     kubectl create namespace travel-prod
+
+ 3.2 Generate STRONG unique secrets per environment (do NOT reuse across envs):
+     openssl rand -hex 32     # SECRET_KEY
+     openssl rand -hex 32     # JWT_SECRET_KEY
+     openssl rand -hex 32     # INTERNAL_API_TOKEN  (SAME value on trip + ai in an env)
+
+ 3.3 Create Kubernetes Secrets (bootstrap form shown; see 3.4 for the prod-grade way).
+     # --- Trip Service secret (staging) ---
+     kubectl -n travel-staging create secret generic trip-service-secrets \
+       --from-literal=SECRET_KEY=<...> \
+       --from-literal=JWT_SECRET_KEY=<...> \
+       --from-literal=INTERNAL_API_TOKEN=<shared-token> \
+       --from-literal=DATABASE_URL="postgresql+psycopg2://<user>:<pass>@<db-host>:5432/<db>" \
+       --from-literal=AI_PLANNER_URL="<TUNNEL_URL>"     # local ai-planner via tunnel (PHASE 5b)
+     # NOTE: ai-planner (B) is NOT in the cluster, so there is no ai-planner Secret
+     #       here. Its config (INTERNAL_API_TOKEN, OLLAMA_URL) lives on your LOCAL
+     #       machine (PHASE 5b). INTERNAL_API_TOKEN MUST match on both sides.
+     # Repeat for travel-prod with DIFFERENT secrets + prod DB URL + prod <TUNNEL_URL>.
+
+ 3.4 RECOMMENDED for real use — do not hand-create secrets:
+     Use External Secrets Operator (pulls from AWS/GCP/Azure secret manager) or
+     Sealed Secrets (encrypted secrets committed to the infra repo). This keeps
+     plaintext secrets out of shell history and Git.
+
+===============================================================================
+ PHASE 4 — BUILD, SCAN & PUSH IMAGES
+===============================================================================
+ From the travel-planner (app) repo. Tag with version + git SHA.
+
+   export TAG=1.0.0-$(git rev-parse --short HEAD)
+
+   docker build -t <REGISTRY>/trip-service:$TAG  services/trip-service
+   docker build -t <REGISTRY>/ai-planner:$TAG    services/ai-planner-service
+   # Frontend: bake same-origin ("") so the Ingress path-routes /api, OR set the
+   # public API URL if you expose trip-service on a different host.
+   docker build --build-arg VITE_TRIP_SERVICE_URL="" \
+     -t <REGISTRY>/frontend:$TAG  frontend
+
+   # Scan before pushing — fail the build on HIGH/CRITICAL:
+   trivy image --exit-code 1 --severity HIGH,CRITICAL <REGISTRY>/trip-service:$TAG
+   trivy image --exit-code 1 --severity HIGH,CRITICAL <REGISTRY>/ai-planner:$TAG
+   trivy image --exit-code 1 --severity HIGH,CRITICAL <REGISTRY>/frontend:$TAG
+
+   docker push <REGISTRY>/trip-service:$TAG
+   docker push <REGISTRY>/ai-planner:$TAG      # pulled by your LOCAL host (PHASE 5b), not the cluster
+   docker push <REGISTRY>/frontend:$TAG
+
+===============================================================================
+ PHASE 5 — HELM CHART & PER-ENVIRONMENT VALUES
+===============================================================================
+ In travel-planner-infra/charts/travel-planner/ (structure in DEVOPS_ARCHITECTURE.md §4).
+ Keep templates generic; put all differences in values-<env>.yaml.
+
+ Example values-staging.yaml:
+ ---------------------------------------------------------------------------
+   global:
+     registry: <REGISTRY>
+     imageTag: 1.0.0-<git-sha>
+     appEnv: staging
+   frontend:
+     replicas: 1
+     ingressHost: <STG_DOMAIN>
+   tripService:
+     replicas: 1
+     runMigrations: false            # migrations run as a Job (PHASE 6)
+     corsOrigins: "https://<STG_DOMAIN>"
+     resources: { requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi} }
+     prometheusMultiprocDir: /tmp/prometheus_multiproc
+     aiPlannerUrl: "<STG_TUNNEL_URL>"   # local ai-planner via tunnel (PHASE 5b)
+   # No aiPlanner section — Service B runs on your local machine (PHASE 5b).
+   hpa:
+     enabled: false                  # staging: keep it simple
+ ---------------------------------------------------------------------------
+
+ Example values-prod.yaml (differences):
+ ---------------------------------------------------------------------------
+   global: { appEnv: production }
+   frontend: { replicas: 3, ingressHost: <PROD_DOMAIN> }
+   tripService:
+     replicas: 3
+     runMigrations: false
+     corsOrigins: "https://<PROD_DOMAIN>"
+     resources: { requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi} }
+     aiPlannerUrl: "<PROD_TUNNEL_URL>"   # local ai-planner via tunnel (PHASE 5b)
+   # (no aiPlanner section — Service B runs on your local machine)
+   hpa: { enabled: true, minReplicas: 3, maxReplicas: 10, targetCPUUtilization: 70 }
+   strategy: bluegreen               # see PHASE 9
+ ---------------------------------------------------------------------------
+
+ KEY TEMPLATE REQUIREMENTS (map app env vars — see forDevOps.txt §6):
+   - trip-service Deployment: env from trip-service-secrets + APP_ENV, PORT=5001,
+     AI_PLANNER_URL=<TUNNEL_URL> (NOT an in-cluster address), CORS_ORIGINS,
+     RUN_MIGRATIONS=false, PROMETHEUS_MULTIPROC_DIR. Probes: /health, /ready.
+   - NO ai-planner Deployment/Service in the cluster — it runs locally (PHASE 5b).
+   - Services: trip-service:5001, frontend:80 (ClusterIP).
+   - Ingress: host -> "/" frontend:80, "/api" trip-service:5001, TLS via cert-manager.
+   - NetworkPolicy: allow ingress -> trip-service; allow trip-service EGRESS to the
+     tunnel endpoint (so it can reach the local ai-planner).
+   - securityContext: runAsNonRoot: true, readOnlyRootFilesystem where possible.
+
+===============================================================================
+ PHASE 5b — LOCAL AI PLANNER (Service B) + SECURE TUNNEL   [ the A<->B link ]
+===============================================================================
+ Service B runs on YOUR machine with Ollama; AWS trip-service reaches it via a tunnel.
+
+ 5b.1 On the local host — start Ollama and the ai-planner service:
+      ollama serve &                      # or run the Ollama desktop app
+      ollama pull llama3.1
+      # From the app repo, run just Service B (docker-compose.yml):
+      INTERNAL_API_TOKEN=<shared-token> AI_PROVIDER=ollama \
+      OLLAMA_URL=http://host.docker.internal:11434 \
+        docker compose up -d ai-planner-service
+      curl -fsS localhost:5002/ready       # -> {"status":"ready","provider":"ollama"}
+
+ 5b.2 Expose it to AWS with ONE of these (details in DEVOPS_ARCHITECTURE.md §2b):
+      # Cloudflare Tunnel (recommended) — stable HTTPS hostname:
+      cloudflared tunnel --url http://localhost:5002
+      #   -> yields <TUNNEL_URL> (https://...). Prefer a named tunnel + your DNS.
+      # Alternatives: ngrok http 5002 | WireGuard / site-to-site VPN | ssh -R via a bastion.
+
+ 5b.3 Wire trip-service to it (used in PHASE 3 secret & PHASE 5 values):
+      AI_PLANNER_URL     = <TUNNEL_URL> from 5b.2
+      INTERNAL_API_TOKEN = the SAME shared token on both sides
+      AI_PLANNER_TIMEOUT = 120            # local Ollama can be slow
+
+ 5b.4 Lock it down: restrict the tunnel (Cloudflare Access / IP allowlist / mTLS);
+      only /api/plan + /api/optimize must be reachable; keep /metrics private.
+      Availability: if the local host is down, POST /api/trips/:id/plan returns 503
+      and the UI degrades gracefully — the rest of the app (in AWS) is unaffected.
+
+===============================================================================
+ PHASE 6 — DATABASE MIGRATIONS (run as a Job, not on every pod)
+===============================================================================
+ Set runMigrations=false on the Deployment and run a Helm pre-upgrade HOOK Job
+ that applies migrations once per release. Example template:
+
+   apiVersion: batch/v1
+   kind: Job
+   metadata:
+     name: trip-service-migrate
+     annotations:
+       "helm.sh/hook": pre-install,pre-upgrade
+       "helm.sh/hook-weight": "-5"
+       "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+   spec:
+     backoffLimit: 3
+     template:
+       spec:
+         restartPolicy: Never
+         containers:
+           - name: migrate
+             image: <REGISTRY>/trip-service:<TAG>
+             command: ["flask", "db", "upgrade"]   # overrides entrypoint; FLASK_APP baked in
+             envFrom:
+               - secretRef: { name: trip-service-secrets }
+
+ The image already has FLASK_APP=wsgi.py, so "flask db upgrade" just works.
+
+===============================================================================
+ PHASE 7 — DEPLOY TO STAGING & VERIFY
+===============================================================================
+ 7.1 Deploy:
+     helm upgrade --install travel-planner ./charts/travel-planner \
+       -n travel-staging -f charts/travel-planner/values-staging.yaml
+
+ 7.2 Watch rollout:
+     kubectl -n travel-staging rollout status deploy/trip-service
+     kubectl -n travel-staging rollout status deploy/frontend
+     kubectl -n travel-staging get pods,svc,ingress
+
+ 7.3 Smoke test (from inside the cluster or via the Ingress host):
+     kubectl -n travel-staging exec deploy/trip-service -- \
+       curl -fsS localhost:5001/health
+     kubectl -n travel-staging exec deploy/trip-service -- \
+       curl -fsS localhost:5001/ready
+     # A<->B link: from a trip-service pod the LOCAL ai-planner must be reachable:
+     kubectl -n travel-staging exec deploy/trip-service -- \
+       curl -fsS "$AI_PLANNER_URL/health"      # via the tunnel (PHASE 5b)
+     # Public path:
+     curl -fsS https://<STG_DOMAIN>/            # SPA loads
+     curl -fsS -X POST https://<STG_DOMAIN>/api/auth/register \
+       -H 'Content-Type: application/json' \
+       -d '{"email":"smoke@test.com","password":"password123","full_name":"Smoke"}'
+     # Register -> login -> create trip -> POST /plan should return an itinerary
+     # (verifies the LLM provider is reachable).
+
+===============================================================================
+ PHASE 8 — WIRE MONITORING & LOGGING
+===============================================================================
+ 8.1 ServiceMonitor per service (Prometheus Operator scrapes /metrics).
+     Example:
+       apiVersion: monitoring.coreos.com/v1
+       kind: ServiceMonitor
+       metadata:
+         name: trip-service
+         labels: { release: kube-prometheus-stack }   # match your stack's selector
+       spec:
+         selector: { matchLabels: { app: trip-service } }
+         namespaceSelector: { matchNames: [travel-staging, travel-prod] }
+         endpoints: [ { port: http, path: /metrics, interval: 15s } ]
+     For ai-planner (local) add a STATIC scrape target pointing at the tunnel,
+     or run a small local Prometheus/agent that remote-writes. Confirm targets UP.
+
+ 8.2 Grafana dashboards (import panels using the metrics in forDevOps.txt §9):
+     - Service up/ready, request rate & p95 from http_request_duration_seconds
+     - trips_created_total, ai_plan_requests_total, ai error ratio & duration
+     - trip_service_db_up, pod CPU/memory.
+
+ 8.3 Alertmanager: add a receiver (Slack/email/PagerDuty) and rules:
+     - trip_service_db_up == 0
+     - rate(ai_plan_failures_total[5m]) high
+     - p95 latency > SLO ; pod CrashLoopBackOff ; readiness flapping.
+
+ 8.4 Logging: confirm Promtail/Fluent Bit is shipping stdout; in Grafana/Kibana
+     filter by service="trip-service" and correlate with request_id.
+
+===============================================================================
+ PHASE 9 — PROMOTE TO PRODUCTION (approval gate + blue/green)
+===============================================================================
+ 9.1 Gate: promotion to prod happens only after staging is green and perf tests
+     pass (PHASE 10 stage 6). Require a MANUAL approval in the pipeline.
+
+ 9.2 Deploy to prod (repeat PHASE 3 secrets for travel-prod first):
+     helm upgrade --install travel-planner ./charts/travel-planner \
+       -n travel-prod -f charts/travel-planner/values-prod.yaml
+
+ 9.3 Blue/Green (zero-downtime):
+     - Deploy the new "green" release alongside the running "blue".
+     - Verify green: /ready + smoke test the green pods directly.
+     - Flip the Service/Ingress selector from blue -> green.
+     - Keep blue for one release cycle for instant rollback:
+         helm rollback travel-planner <PREV_REVISION> -n travel-prod
+     - Tooling: Argo Rollouts gives this natively; otherwise run two colored
+       Helm releases and switch the Service selector.
+
+===============================================================================
+ PHASE 10 — CI/CD PIPELINE (the 7 stages)  [travel-planner-cicd]
+===============================================================================
+ Wire these as pipeline stages (GitHub Actions / GitLab CI / Jenkins):
+   1. Static analysis + security:  ruff+bandit (py), eslint (js), gitleaks, pip/npm audit
+   2. Build & test each service:   pytest (trip-service), pytest (ai-planner),
+                                    npm test + npm run build (frontend)
+   3. Image build + scan + push:   docker build -> trivy (block HIGH/CRIT) -> push :semver-sha
+   4. Deploy to dev + integration: helm upgrade -n travel-dev ; run API integration tests
+   5. Promote to staging (GATE):   manual approval -> helm upgrade -n travel-staging
+   6. Performance testing:         k6/locust vs https://<STG_DOMAIN> ; assert p95 + error rate
+   7. Blue/Green to production:    manual approval -> PHASE 9
+
+ Store kubeconfig/cloud creds as protected CI secrets. Never bake secrets into images.
+
+===============================================================================
+ PHASE 11 — VERIFICATION CHECKLIST (per environment)
+===============================================================================
+   [ ] kubectl get pods -n <ns> : all Running & Ready
+   [ ] /health + /ready = 200 for trip-service & frontend (AWS), ai-planner (local)
+   [ ] A<->B link works: trip-service reaches the local ai-planner over the tunnel
+   [ ] Public SPA loads over HTTPS; register/login works
+   [ ] POST /api/trips/:id/plan returns an itinerary (local Ollama reachable)
+   [ ] Prometheus targets UP (trip-service in-cluster; ai-planner via tunnel)
+   [ ] Grafana dashboards populate; test alert fires to the channel
+   [ ] Logs searchable by service + request_id
+   [ ] TLS valid; CORS restricted to the env domain; secrets are per-env
+   [ ] Rollback tested: helm rollback returns to previous revision
+
+===============================================================================
+ PHASE 12 — DAY-2 OPERATIONS
+===============================================================================
+   - Scaling:   HPA on trip-service (prod); tune GUNICORN_WORKERS. Keep
+                PROMETHEUS_MULTIPROC_DIR set when workers > 1. Scale ai-planner by
+                running it on a stronger local host / more Ollama capacity.
+   - A<->B:     the local host is a SPOF for planning — monitor the tunnel + Ollama;
+                on outage, /plan returns 503 and the rest of the app keeps working.
+   - Database:  automated backups + PITR; test restore; run migrations via the
+                Job on each release (never auto-migrate from N replicas).
+   - Secrets:   rotate SECRET_KEY/JWT/INTERNAL_API_TOKEN/OPENAI_API_KEY periodically
+                (rotate INTERNAL_API_TOKEN on trip + ai together).
+   - Timeouts:  AI calls are slow — align ai-planner gunicorn timeout (180s),
+                trip-service AI_PLANNER_TIMEOUT (120s+), tunnel + Ingress timeouts.
+   - Cost/perf: watch ai_generation_duration_seconds; pick model per env
+                (cheaper in staging, stronger in prod).
+
+===============================================================================
+ QUICK REFERENCE
+===============================================================================
+   App env vars & metrics list ....... forDevOps.txt (§6, §9)
+   Architecture & requirement mapping. DEVOPS_ARCHITECTURE.md
+   Local one-box run (compose) ....... README.md  ("docker compose up")
+   Ports (AWS) ....................... frontend 80 | trip-service 5001 | pg 5432
+   Ports (local) ..................... ai-planner 5002 | Ollama 11434
+   A<->B link ........................ tunnel/VPN + X-Internal-Token (DEVOPS_ARCHITECTURE §2b)
+   Namespaces ........................ travel-staging | travel-prod
+   Migration command ................. flask db upgrade   (FLASK_APP=wsgi.py, baked in)
+===============================================================================

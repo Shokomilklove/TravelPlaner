@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-service
+  labels:
+    app: trip-service
+    {{- include "tp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.tripService.replicas }}
+  selector:
+    matchLabels:
+      app: trip-service
+  template:
+    metadata:
+      labels:
+        app: trip-service
+        {{- include "tp.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      {{- if .Values.migrations.enabled }}
+      initContainers:
+        - name: migrate
+          image: {{ include "tp.image" (dict "root" $ "repo" .Values.tripService.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Wait for the DB, then apply migrations (idempotent). FLASK_APP is baked in.
+          command: ["sh", "-c", "until flask db upgrade; do echo 'waiting for db...'; sleep 3; done"]
+          envFrom:
+            - configMapRef:
+                name: trip-service-config
+            - secretRef:
+                name: {{ include "tp.secretName" . }}
+      {{- end }}
+      containers:
+        - name: trip-service
+          image: {{ include "tp.image" (dict "root" $ "repo" .Values.tripService.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.tripService.port }}
+          envFrom:
+            - configMapRef:
+                name: trip-service-config
+            - secretRef:
+                name: {{ include "tp.secretName" . }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+          {{- with .Values.tripService.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

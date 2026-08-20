@@ -1,0 +1,36 @@
+# Staging overrides — self-contained (in-cluster Postgres).
+appEnv: staging
+
+image:
+  registry: ""            # set to your ECR, e.g. 123.dkr.ecr.eu-west-1.amazonaws.com/travel-planner
+  tag: "1.0.0"
+
+tripService:
+  replicas: 1
+  corsOrigins: "https://staging.travelplanner.example.com"
+
+frontend:
+  replicas: 1
+
+aiPlanner:
+  url: "https://REPLACE-with-your-quick-tunnel.trycloudflare.com"
+
+postgres:
+  enabled: true           # in-cluster Postgres for a quick, self-contained staging
+
+ingress:
+  enabled: true
+  host: staging.travelplanner.example.com
+  tls:
+    enabled: true
+    secretName: travel-tls-staging
+    clusterIssuer: letsencrypt-prod
+
+secrets:
+  create: true
+  secretKey: "CHANGE_ME_staging_flask"
+  jwtSecretKey: "CHANGE_ME_staging_jwt"
+  internalApiToken: "CHANGE_ME_matches_service_B"
+
+serviceMonitor:
+  enabled: false

@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 620" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6675"/></marker>
+    <marker id="darrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a1b4"/></marker>
+    <marker id="parrow" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#7c4dff"/></marker>
+    <marker id="parrowS" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#7c4dff"/></marker>
+  </defs>
+  <style>
+    .title{fill:#1f2733;font-size:19px;font-weight:700}
+    .awslbl{fill:#b3730a;font-size:13px;font-weight:700}
+    .locallbl{fill:#465063;font-size:13px;font-weight:700}
+    .clusterlbl{fill:#33507f;font-size:12.5px;font-weight:700}
+    .nslbl{fill:#ffffff;font-size:11.5px;font-weight:700}
+    .name{fill:#1f2733;font-size:12.5px;font-weight:700;text-anchor:middle}
+    .sub{fill:#6b7686;font-size:9.5px;text-anchor:middle}
+    .edge{fill:#1f2733;font-size:11px;font-weight:600;text-anchor:middle}
+    .dedge{fill:#8a93a3;font-size:10px;font-style:italic;text-anchor:middle}
+    .note{fill:#6b7686;font-size:10.5px}
+    .flow{stroke:#5b6675;stroke-width:2;fill:none}
+    .dash{stroke:#94a1b4;stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+    .link{stroke:#7c4dff;stroke-width:3.2;fill:none}
+  </style>
+
+  <rect width="1180" height="620" fill="#ffffff"/>
+  <text x="26" y="36" class="title">Travel Planner — Hybrid Deployment (AWS keeps Service A · AI Planner runs local)</text>
+
+  <!-- Users -->
+  <rect x="20" y="228" width="104" height="56" rx="12" fill="#2f3a4d"/>
+  <text x="72" y="253" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="700">Users</text>
+  <text x="72" y="270" text-anchor="middle" fill="#cbd3e0" font-size="10.5">Browser</text>
+
+  <!-- ===================== AWS CLOUD ===================== -->
+  <rect x="150" y="58" width="610" height="414" rx="16" fill="#fff8ef" stroke="#f0c48a" stroke-width="1.5"/>
+  <text x="168" y="82" class="awslbl">AWS account — provisioned by Terraform (EKS · RDS · ECR)</text>
+
+  <!-- K8s cluster -->
+  <rect x="168" y="98" width="574" height="228" rx="12" fill="#eef3fc" stroke="#b9cdec" stroke-width="1.5" stroke-dasharray="7 4"/>
+  <text x="186" y="120" class="clusterlbl">Kubernetes Cluster (VPC · private subnets)</text>
+
+  <!-- Ingress -->
+  <rect x="188" y="150" width="112" height="80" rx="8" fill="#ffffff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="244" y="182" class="name">Ingress</text>
+  <text x="244" y="198" class="sub">+ TLS (nginx)</text>
+  <text x="244" y="212" class="sub">cert-manager</text>
+
+  <!-- prod namespace (frontend + trip-service ONLY) -->
+  <rect x="322" y="130" width="400" height="128" rx="10" fill="#ffffff" stroke="#dce3ee" stroke-width="1.5"/>
+  <path d="M322,140 a10,10 0 0 1 10,-10 h380 a10,10 0 0 1 10,10 v14 h-400 z" fill="#2f6bff"/>
+  <text x="336" y="147" class="nslbl">namespace: travel-prod  (travel-staging mirrors it)</text>
+
+  <rect x="338" y="166" width="168" height="82" rx="8" fill="#e4f6f3" stroke="#34b3a6" stroke-width="1.5"/>
+  <text x="422" y="196" class="name">frontend</text>
+  <text x="422" y="211" class="sub">nginx (SPA)</text>
+  <text x="422" y="225" class="sub">Deploy + Service</text>
+
+  <rect x="528" y="166" width="178" height="82" rx="8" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="617" y="192" class="name">trip-service (A)</text>
+  <text x="617" y="207" class="sub">Flask · JWT · REST</text>
+  <text x="617" y="221" class="sub">Deploy + Svc + HPA</text>
+
+  <!-- RDS -->
+  <ellipse cx="617" cy="356" rx="62" ry="12" fill="#fff4d6" stroke="#d9a400" stroke-width="1.5"/>
+  <path d="M555,356 V420 a62,12 0 0 0 124,0 V356" fill="#fff4d6" stroke="#d9a400" stroke-width="1.5"/>
+  <text x="617" y="388" class="name">Amazon RDS</text>
+  <text x="617" y="403" class="sub">PostgreSQL (staging + prod)</text>
+
+  <text x="188" y="286" class="note">▸ Service A only: frontend + trip-service + DB live in AWS.</text>
+  <text x="188" y="303" class="note">▸ Probes /health · /ready · /metrics · JSON logs → in-cluster observability (below).</text>
+
+  <!-- ===================== SECURE LINK A <-> B ===================== -->
+  <path class="link" d="M708,206 H900" marker-start="url(#parrowS)" marker-end="url(#parrow)"/>
+  <text x="806" y="150" text-anchor="middle" fill="#5b3fb3" font-size="12" font-weight="700">A  ⇄  B  link</text>
+  <text x="806" y="167" text-anchor="middle" fill="#7c4dff" font-size="10.5">internal REST · X-Internal-Token</text>
+  <!-- tunnel box drawn on top of the link -->
+  <rect x="760" y="176" width="92" height="60" rx="9" fill="#f3ecff" stroke="#7c4dff" stroke-width="1.6"/>
+  <text x="806" y="199" text-anchor="middle" fill="#5b3fb3" font-size="10.5" font-weight="700">Secure</text>
+  <text x="806" y="213" text-anchor="middle" fill="#5b3fb3" font-size="10.5" font-weight="700">tunnel / VPN</text>
+  <text x="806" y="226" text-anchor="middle" fill="#8a7bc0" font-size="9">TLS · outbound from local</text>
+
+  <!-- ===================== LOCAL MACHINE ===================== -->
+  <rect x="900" y="98" width="262" height="360" rx="16" fill="#f2f4f7" stroke="#b6c0cf" stroke-width="1.6"/>
+  <text x="918" y="122" class="locallbl">Your local machine (on-prem / dev host)</text>
+
+  <rect x="922" y="164" width="218" height="86" rx="8" fill="#ece6fb" stroke="#7c4dff" stroke-width="1.6"/>
+  <text x="1031" y="194" class="name">ai-planner (B)</text>
+  <text x="1031" y="209" class="sub">Flask · stateless</text>
+  <text x="1031" y="223" class="sub">Prompt · Optimize · Budget</text>
+
+  <rect x="922" y="312" width="218" height="84" rx="8" fill="#e4f6f3" stroke="#34b3a6" stroke-width="1.6"/>
+  <text x="1031" y="344" class="name">Ollama</text>
+  <text x="1031" y="359" class="sub">local LLM runtime</text>
+  <text x="1031" y="373" class="sub">e.g. llama3.1</text>
+
+  <text x="922" y="430" class="note">AI_PROVIDER=ollama</text>
+  <text x="922" y="446" class="note">OLLAMA_URL=http://localhost:11434</text>
+
+  <!-- B -> Ollama -->
+  <path class="flow" d="M1031,250 V310" marker-end="url(#arrow)"/>
+  <text x="1031" y="284" class="edge" fill="#34b3a6">local call</text>
+
+  <!-- ===================== FLOWS (A side) ===================== -->
+  <path class="flow" d="M124,256 L184,206" marker-end="url(#arrow)"/>
+  <path class="flow" d="M300,196 H336" marker-end="url(#arrow)"/>
+  <text x="318" y="188" class="edge">/</text>
+  <path class="flow" d="M292,150 Q430,104 617,164" marker-end="url(#arrow)"/>
+  <text x="452" y="120" class="edge">/api</text>
+  <path class="flow" d="M617,248 V344" marker-end="url(#arrow)"/>
+  <text x="636" y="300" class="edge">SQL</text>
+
+  <!-- ===================== OBSERVABILITY BAND ===================== -->
+  <text x="26" y="500" class="awslbl" fill="#6b7686">In-cluster observability (AWS) — Prometheus / Grafana / Alertmanager · Loki / ELK</text>
+  <rect x="20" y="510" width="470" height="92" rx="10" fill="#ffffff" stroke="#e0b25c" stroke-width="1.5"/>
+  <path d="M20,520 a10,10 0 0 1 10,-10 h450 a10,10 0 0 1 10,10 v13 h-470 z" fill="#d98a00"/>
+  <text x="34" y="527" class="nslbl">namespace: monitoring</text>
+  <rect x="34" y="544" width="140" height="46" rx="7" fill="#fbf3e6" stroke="#e0b25c"/>
+  <text x="104" y="564" class="name">Prometheus</text><text x="104" y="579" class="sub">scrape /metrics</text>
+  <rect x="184" y="544" width="140" height="46" rx="7" fill="#fbf3e6" stroke="#e0b25c"/>
+  <text x="254" y="564" class="name">Grafana</text><text x="254" y="579" class="sub">dashboards</text>
+  <rect x="334" y="544" width="146" height="46" rx="7" fill="#fbf3e6" stroke="#e0b25c"/>
+  <text x="407" y="564" class="name">Alertmanager</text><text x="407" y="579" class="sub">Slack / email</text>
+
+  <rect x="506" y="510" width="254" height="92" rx="10" fill="#ffffff" stroke="#58c58a" stroke-width="1.5"/>
+  <path d="M506,520 a10,10 0 0 1 10,-10 h234 a10,10 0 0 1 10,10 v13 h-254 z" fill="#1f9d55"/>
+  <text x="520" y="527" class="nslbl">namespace: logging</text>
+  <rect x="520" y="544" width="110" height="46" rx="7" fill="#e7f8ee" stroke="#58c58a"/>
+  <text x="575" y="564" class="name">Promtail</text><text x="575" y="579" class="sub">JSON stdout</text>
+  <rect x="640" y="544" width="106" height="46" rx="7" fill="#e7f8ee" stroke="#58c58a"/>
+  <text x="693" y="564" class="name">Loki / ELK</text><text x="693" y="579" class="sub">Grafana/Kibana</text>
+
+  <path class="dash" d="M110,544 Q300,430 560,250" marker-end="url(#darrow)"/>
+  <text x="330" y="470" class="dedge">scrape /metrics · ship logs (Service A)</text>
+  <text x="790" y="480" class="note" fill="#8a7bc0">Service B (local) exposes /metrics too —</text>
+  <text x="790" y="496" class="note" fill="#8a7bc0">scrape it over the tunnel or with a local Prometheus.</text>
+</svg>

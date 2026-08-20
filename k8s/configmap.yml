@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: travel-planner-config
+  namespace: travel-planner
+data:
+  APP_ENV: "production"
+  JWT_ACCESS_TOKEN_EXPIRES: "86400"
+  AI_PROVIDER: "ollama"
+  OPENAI_MODEL: "gpt-4o-mini"
+  OLLAMA_URL: "http://host.minikube.internal:11434"
+  OLLAMA_MODEL: "llama3.2:3b"
+  AI_TIMEOUT: "1000"
+  CORS_ORIGINS: "*"
+  LOG_LEVEL: "INFO"
+  PROMETHEUS_MULTIPROC_DIR: "/tmp/prometheus_multiproc"
+  TRIP_SERVICE_PORT: "5001"
+  AI_PLANNER_PORT: "5002"

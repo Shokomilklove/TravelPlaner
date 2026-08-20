@@ -1,0 +1,106 @@
+# ============================================================================
+# Travel Planner Helm chart — default values
+# Override per environment with values-staging.yaml / values-prod.yaml.
+# ============================================================================
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Container images. If `registry` is set, images are <registry>/<repository>:<tag>.
+# Leave `registry` empty for local clusters where images are loaded by name.
+image:
+  registry: ""            # e.g. 123456789.dkr.ecr.eu-west-1.amazonaws.com/travel-planner
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+appEnv: production          # development | staging | production
+logLevel: INFO
+
+# ---- Secrets --------------------------------------------------------------
+# Either let the chart create the Secret from the values below (secrets.create),
+# or point at an existing Secret you manage (existingSecret) that contains:
+#   SECRET_KEY, JWT_SECRET_KEY, INTERNAL_API_TOKEN, DATABASE_URL
+secrets:
+  create: true
+  existingSecret: ""
+  secretKey: "CHANGE_ME_flask_secret"
+  jwtSecretKey: "CHANGE_ME_jwt_secret"
+  internalApiToken: "CHANGE_ME_internal_token"   # MUST match your local Service B
+
+# ---- AI Planner (Service B) ----------------------------------------------
+# Service B runs OUTSIDE the cluster (local machine + Ollama). Point this at the
+# secure tunnel/VPN endpoint that fronts it.
+aiPlanner:
+  url: "http://host.docker.internal:5002"        # override with your tunnel URL
+  timeout: 120
+
+# ---- Database -------------------------------------------------------------
+# In-cluster PostgreSQL — great for a self-contained cluster / staging.
+# For production, set postgres.enabled=false and use externalDatabase (e.g. RDS).
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  user: travel
+  password: travel
+  database: travel
+  storage: 5Gi
+  resources: {}
+
+externalDatabase:
+  # Used only when postgres.enabled=false. Or provide DATABASE_URL via existingSecret.
+  url: ""     # postgresql+psycopg2://user:pass@host:5432/dbname
+
+# ---- Trip Service (Backend A) --------------------------------------------
+tripService:
+  repository: trip-service
+  replicas: 2
+  port: 5001                # keep 5001: the frontend image proxies /api here by name
+  corsOrigins: "*"
+  runMigrations: false      # migrations run via an initContainer (see migrations.enabled)
+  prometheusMultiprocDir: /tmp/prometheus_multiproc
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+# ---- Frontend -------------------------------------------------------------
+frontend:
+  repository: frontend
+  replicas: 2
+  port: 80
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+
+# Run `flask db upgrade` in an initContainer before the app container starts.
+migrations:
+  enabled: true
+
+# ---- Ingress + TLS --------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: travel.example.com
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: travel-tls
+    clusterIssuer: letsencrypt-prod   # set "" to skip the cert-manager annotation
+
+# Optionally create a Let's Encrypt ClusterIssuer (cluster-scoped; needs cert-manager).
+certIssuer:
+  create: false
+  email: you@example.com
+
+# ---- Observability --------------------------------------------------------
+serviceMonitor:
+  enabled: false
+  release: kps              # label your kube-prometheus-stack selects on
+
+# ---- Network policy -------------------------------------------------------
+networkPolicy:
+  enabled: false            # when true, restrict who can reach trip-service

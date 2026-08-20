@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6675"/></marker>
+    <marker id="darrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a1b4"/></marker>
+  </defs>
+  <style>
+    .title{fill:#1f2733;font-size:17px;font-weight:700}
+    .name{fill:#1f2733;font-size:12.5px;font-weight:700;text-anchor:middle}
+    .sub{fill:#6b7686;font-size:9.5px;text-anchor:middle}
+    .edge{fill:#8a93a3;font-size:10px;font-style:italic;text-anchor:middle}
+    .flow{stroke:#5b6675;stroke-width:2;fill:none}
+    .dash{stroke:#94a1b4;stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+  </style>
+  <rect width="1000" height="320" fill="#ffffff"/>
+  <text x="26" y="34" class="title">Monitoring stack</text>
+
+  <!-- sources -->
+  <rect x="30" y="70" width="210" height="58" rx="8" fill="#e5eeff" stroke="#2f6bff" stroke-width="1.5"/>
+  <text x="135" y="94" class="name">trip-service (A)</text>
+  <text x="135" y="110" class="sub">/metrics · in AWS</text>
+
+  <rect x="30" y="150" width="210" height="58" rx="8" fill="#ece6fb" stroke="#7c4dff" stroke-width="1.5"/>
+  <text x="135" y="174" class="name">ai-planner (B)</text>
+  <text x="135" y="190" class="sub">/metrics · local (via tunnel)</text>
+
+  <rect x="30" y="230" width="210" height="50" rx="8" fill="#eef2f8" stroke="#7d8aa0" stroke-width="1.5"/>
+  <text x="135" y="251" class="name">kube-state-metrics</text>
+  <text x="135" y="266" class="sub">node-exporter</text>
+
+  <!-- prometheus -->
+  <rect x="360" y="120" width="180" height="86" rx="9" fill="#fbf3e6" stroke="#d9a400" stroke-width="1.6"/>
+  <text x="450" y="156" class="name">Prometheus</text>
+  <text x="450" y="172" class="sub">scrape + store</text>
+  <text x="450" y="186" class="sub">TSDB</text>
+
+  <!-- grafana + alertmanager -->
+  <rect x="660" y="66" width="200" height="60" rx="8" fill="#fbf3e6" stroke="#e0b25c" stroke-width="1.5"/>
+  <text x="760" y="90" class="name">Grafana</text>
+  <text x="760" y="106" class="sub">latency · AI success · db_up</text>
+
+  <rect x="660" y="176" width="200" height="60" rx="8" fill="#fbf3e6" stroke="#e0b25c" stroke-width="1.5"/>
+  <text x="760" y="200" class="name">Alertmanager</text>
+  <text x="760" y="216" class="sub">rules &amp; routing</text>
+
+  <rect x="660" y="256" width="310" height="46" rx="8" fill="#e7f8ee" stroke="#58c58a" stroke-width="1.5"/>
+  <text x="815" y="284" class="name">Slack · Email · PagerDuty</text>
+
+  <!-- flows -->
+  <path class="flow" d="M240,99 H356" marker-end="url(#arrow)"/>
+  <path class="dash" d="M240,179 Q300,165 356,158" marker-end="url(#darrow)"/>
+  <text x="300" y="150" class="edge">via tunnel</text>
+  <path class="flow" d="M240,252 Q300,230 356,190" marker-end="url(#arrow)"/>
+
+  <path class="flow" d="M540,150 Q600,110 656,96" marker-end="url(#arrow)"/>
+  <text x="600" y="112" class="edge">dashboards</text>
+  <path class="flow" d="M540,176 Q600,200 656,206" marker-end="url(#arrow)"/>
+  <text x="600" y="222" class="edge">alerts</text>
+  <path class="flow" d="M760,236 V254" marker-end="url(#arrow)"/>
+</svg>

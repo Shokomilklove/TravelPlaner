@@ -1,0 +1,321 @@
+===============================================================================
+ TRAVEL PLANNER — DEVOPS HAND-OFF
+===============================================================================
+ Prepared by: Development
+ Audience:    DevOps / Platform Engineering
+ Scope:       How to build, run, configure, observe and secure the application.
+
+ What this repo IS:  the application (frontend + 2 Flask services), tests,
+                     multi-stage Dockerfiles, docker-compose, Prometheus
+                     metrics endpoints, structured JSON logging, DB migrations.
+
+ What this repo is NOT (owned by DevOps):
+   - Kubernetes manifests / Helm charts
+   - Terraform / cloud infra (EKS/GKE/AKS, RDS, networking, secrets manager)
+   - CI/CD pipelines and image scanning / registry push
+   - Prometheus, Grafana, Alertmanager servers
+   - Log aggregation stack (ELK / Loki)
+   The apps EXPOSE /metrics and emit JSON logs; you run the collectors.
+
+===============================================================================
+ 1. ARCHITECTURE & COMPONENTS
+===============================================================================
+
+ Browser ─HTTP/JWT─▶ Frontend (nginx)
+                     │  proxies /api ─▶ Trip Service (Backend A) ─▶ PostgreSQL
+                                          │
+                                          └─internal REST (X-Internal-Token)─▶
+                                            AI Planner (Backend B) ─▶ OpenAI/Ollama
+
+ Component            Dir                          Port   Stateful  Public
+ -------------------  ---------------------------  -----  --------  ------
+ Frontend (nginx)     frontend/                    80     no        yes
+ Trip Service (A)     services/trip-service/       5001   via DB    yes
+ AI Planner (B)       services/ai-planner-service/ 5002   no        no (internal)
+ PostgreSQL           (external / container)       5432   YES       no
+
+ Notes:
+   - The browser talks ONLY to the Trip Service (directly in dev, or via the
+     frontend nginx /api proxy in the container image).
+   - The AI Planner is internal-only and must NOT be exposed publicly. It is
+     guarded by a shared secret (INTERNAL_API_TOKEN).
+   - Only the Trip Service uses the database.
+
+===============================================================================
+ 2. PREREQUISITES
+===============================================================================
+   - Docker 24+ and Docker Compose v2         (container path)
+   - OR: Python 3.12+, Node 20+, PostgreSQL 14+ (manual path)
+   - An LLM provider: an OpenAI API key, OR a reachable Ollama server.
+     (There is NO offline mock — planning needs a real provider.)
+
+===============================================================================
+ 3. FAST PATH — DOCKER COMPOSE (local / single host)
+===============================================================================
+   cp env.example .env          # edit secrets + AI provider
+   docker compose up --build    # add -d to detach
+
+   Published ports:
+     Frontend         http://localhost:8080
+     Trip Service     http://localhost:5001
+     AI Planner       http://localhost:5002
+     PostgreSQL       localhost:5432
+
+   - DB migrations run automatically on Trip Service startup (entrypoint.sh).
+   - Tear down:            docker compose down
+   - Tear down + wipe DB:  docker compose down -v
+
+===============================================================================
+ 4. MANUAL BUILD & RUN (per service)
+===============================================================================
+ 4.1 Trip Service (Backend A) — port 5001
+     cd services/trip-service
+     python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+     pip install -r requirements.txt
+     export FLASK_APP=wsgi.py
+     export DATABASE_URL=postgresql+psycopg2://USER:PASS@HOST:5432/DBNAME
+     flask db upgrade                                  # apply migrations
+     # Dev:
+     flask run --port 5001
+     # Production:
+     gunicorn -c gunicorn.conf.py wsgi:app
+
+ 4.2 AI Planner Service (Backend B) — port 5002
+     cd services/ai-planner-service
+     python -m venv .venv && . .venv/bin/activate
+     pip install -r requirements.txt
+     export AI_PROVIDER=openai                         # or ollama
+     export OPENAI_API_KEY=sk-...                      # if openai
+     # Dev:
+     flask --app wsgi run --port 5002
+     # Production:
+     gunicorn -c gunicorn.conf.py wsgi:app
+
+ 4.3 Frontend — static build served by any web server / CDN
+     cd frontend
+     npm ci
+     # VITE_ vars are baked at BUILD time:
+     VITE_TRIP_SERVICE_URL=https://api.example.com npm run build
+     # Output: frontend/dist/  (serve it; SPA needs a fallback to index.html)
+     # The provided Dockerfile serves it via nginx with an /api reverse proxy.
+
+===============================================================================
+ 5. DATABASE & MIGRATIONS
+===============================================================================
+   - Engine: PostgreSQL 16 (14+ works). Only the Trip Service connects.
+   - Schema is managed by Flask-Migrate (Alembic) in
+       services/trip-service/migrations/
+   - Apply migrations:        flask db upgrade      (FLASK_APP=wsgi.py)
+   - Create a new migration:  flask db migrate -m "message"   then review it
+   - In containers, entrypoint.sh runs `flask db upgrade` on start and retries
+     up to 10x while the DB becomes reachable. Disable with RUN_MIGRATIONS=false
+     (e.g. if you run migrations as a separate K8s Job/initContainer).
+   - Tables: users, trips, itineraries (UUID string PKs; JSONB columns for
+     trip preferences and the generated plan).
+
+===============================================================================
+ 6. ENVIRONMENT VARIABLES
+===============================================================================
+ Every setting is read from the environment (12-factor). Per-service references
+ live in each service's env.example. Summary below.
+ (D)=has safe dev default  (SECRET)=override everywhere  (REQUIRED)=must set
+
+ 6.1 TRIP SERVICE (services/trip-service/env.example)
+ ---------------------------------------------------------------------------
+ APP_ENV                 development|staging|production          (D=development)
+ SERVICE_VERSION         reported by /health                     (D=1.0.0)
+ PORT                    listen port                             (D=5001)
+ SECRET_KEY              Flask secret               (SECRET)     (D, CHANGE)
+ JWT_SECRET_KEY          signs JWTs                 (SECRET)     (D, CHANGE)
+ JWT_ACCESS_TOKEN_EXPIRES  token lifetime, seconds               (D=86400)
+ DATABASE_URL            SQLAlchemy URL             (REQUIRED in prod)
+                         postgresql+psycopg2://user:pass@host:5432/db
+ AI_PLANNER_URL          Backend B base URL                      (D=http://localhost:5002)
+ INTERNAL_API_TOKEN      shared secret w/ Backend B (SECRET)     (D, CHANGE)
+ AI_PLANNER_TIMEOUT      seconds                                 (D=60)
+ CORS_ORIGINS            comma list or *                         (D=*, restrict in prod)
+ LOG_LEVEL               DEBUG|INFO|WARNING|ERROR                (D=INFO)
+ RUN_MIGRATIONS          run migrations on container start       (D=true)
+ PROMETHEUS_MULTIPROC_DIR  REQUIRED for multi-worker gunicorn metrics (see §9)
+ GUNICORN_WORKERS/THREADS/TIMEOUT  tune the WSGI server          (optional)
+
+ 6.2 AI PLANNER SERVICE (services/ai-planner-service/env.example)
+ ---------------------------------------------------------------------------
+ APP_ENV                 development|staging|production          (D=development)
+ PORT                    listen port                             (D=5002)
+ INTERNAL_API_TOKEN      MUST match Trip Service    (SECRET)     (D, CHANGE)
+ AI_PROVIDER             openai | ollama                         (D=openai)
+ OPENAI_API_KEY          if AI_PROVIDER=openai      (SECRET)
+ OPENAI_MODEL            e.g. gpt-4o-mini                        (D=gpt-4o-mini)
+ OPENAI_BASE_URL         optional (Azure/proxy/compatible)
+ OLLAMA_URL              if AI_PROVIDER=ollama                   (D=http://localhost:11434)
+ OLLAMA_MODEL            e.g. llama3.1                           (D=llama3.1)
+ AI_TIMEOUT              LLM call timeout, seconds               (D=90)
+ AI_TEMPERATURE          generation temperature                  (D=0.7)
+ AI_MAX_RETRIES          corrective retries on bad JSON          (D=1)
+ LOG_LEVEL               DEBUG|INFO|WARNING|ERROR                (D=INFO)
+ PROMETHEUS_MULTIPROC_DIR  REQUIRED for multi-worker gunicorn metrics (see §9)
+
+ 6.3 FRONTEND (build-time only; VITE_ prefix)
+ ---------------------------------------------------------------------------
+ VITE_TRIP_SERVICE_URL   Trip Service base URL baked into the bundle.
+                         Empty => same-origin (nginx image proxies /api).
+                         Dev:   http://localhost:5001
+
+ 6.4 Per-stage guidance
+ ---------------------------------------------------------------------------
+   dev      : defaults are fine; DEBUG on; CORS *; SQLite acceptable for tests.
+   staging  : production images; DEBUG off; real secrets from your secrets
+              manager; separate DB; restrict CORS_ORIGINS to the staging domain.
+   prod     : STRONG unique SECRET_KEY/JWT_SECRET_KEY/INTERNAL_API_TOKEN;
+              CORS_ORIGINS = exact frontend origin(s); managed Postgres with
+              backups; set PROMETHEUS_MULTIPROC_DIR; scale via GUNICORN_WORKERS.
+
+===============================================================================
+ 7. INTERNAL SERVICE AUTH
+===============================================================================
+   - Trip Service -> AI Planner calls send header:  X-Internal-Token: <token>
+   - Both services must share the SAME INTERNAL_API_TOKEN.
+   - The AI Planner rejects any request without a matching token (401,
+     constant-time compare).
+   - Keep Backend B off the public network (internal Service/NetworkPolicy).
+
+===============================================================================
+ 8. HEALTH, READINESS & METRICS ENDPOINTS
+===============================================================================
+   Both services expose (unauthenticated, for probes/scrapers):
+
+   GET /health   Liveness. 200 if the process is up. Does NOT touch the DB.
+                 -> use for Kubernetes livenessProbe.
+   GET /ready    Readiness. Trip Service checks the DB (SELECT 1); AI Planner
+                 checks that a provider is configured. 200 ready / 503 not.
+                 -> use for Kubernetes readinessProbe.
+   GET /metrics  Prometheus exposition format. -> Prometheus scrape target.
+
+   Trip Service also serves a lightweight registry:
+   GET /api/services                      list services + live health
+   GET /api/services/<name>/health        per-service health
+
+   Example K8s probes (Trip Service):
+     livenessProbe:  httpGet: { path: /health, port: 5001 }
+     readinessProbe: httpGet: { path: /ready,  port: 5001 }
+
+===============================================================================
+ 9. PROMETHEUS METRICS
+===============================================================================
+ Scrape GET /metrics on each service (ports 5001 and 5002).
+
+ IMPORTANT — multi-worker gunicorn:
+   Metrics are per-process. To aggregate across gunicorn workers you MUST set
+   PROMETHEUS_MULTIPROC_DIR to a writable, EMPTY-on-start directory. The
+   Docker images set it to /tmp/prometheus_multiproc and clear it on start;
+   gunicorn.conf.py cleans up per-worker files on exit. If you do not set it,
+   /metrics reflects only the worker that served the scrape.
+
+ Common (both services):
+   http_requests_total{method,endpoint,status}
+   http_request_duration_seconds_bucket/sum/count{method,endpoint}
+
+ Trip Service business metrics:
+   users_registered_total
+   trips_created_total
+   trips_saved_total
+   ai_plan_requests_total{status=success|error}
+   ai_plan_request_duration_seconds
+   ai_plan_failures_total{reason}
+   trip_service_db_up            (1/0; refreshed on /ready — probe it regularly)
+
+ AI Planner business metrics:
+   ai_generation_requests_total{provider,status=success|error}
+   ai_generation_duration_seconds{provider}
+   ai_provider_up                (1 if a provider is configured)
+
+ Suggested alerts (build in your Alertmanager):
+   - high rate of ai_plan_failures_total / ai_generation_requests_total{status=error}
+   - trip_service_db_up == 0
+   - p95 http_request_duration_seconds too high
+   - readiness (up{job=...}) flapping
+
+===============================================================================
+ 10. LOGGING (for ELK / Loki)
+===============================================================================
+   - Both services log ONE JSON object per line to stdout.
+   - Fields: timestamp, level, logger, service, message, request_id, method,
+     path (plus any extra fields attached per event).
+   - Every response carries an X-Request-ID header (accepts an inbound
+     X-Request-ID for trace correlation).
+   - Ship stdout with your log agent (Filebeat/Fluent Bit/Promtail). No app
+     changes needed; parse as JSON.
+
+   Example line:
+   {"timestamp":"...","level":"INFO","logger":"app","service":"trip-service",
+    "message":"itinerary generated","request_id":"...","method":"POST",
+    "path":"/api/trips/<id>/plan","trip_id":"...","provider":"openai"}
+
+===============================================================================
+ 11. CONTAINER IMAGES
+===============================================================================
+   - Multi-stage builds; final images run as a NON-ROOT user (app).
+   - Python services: builder installs deps into a venv; slim runtime copies it.
+   - Frontend: node build stage -> nginx:alpine serving static assets, with an
+     /api reverse proxy to trip-service (see frontend/nginx.conf).
+   - HEALTHCHECK is defined in each image (curl /health, or / for frontend).
+   - Build individually:
+       docker build -t travel-planner/trip-service   services/trip-service
+       docker build -t travel-planner/ai-planner      services/ai-planner-service
+       docker build -t travel-planner/frontend        frontend
+     Frontend base URL (if not same-origin):
+       docker build --build-arg VITE_TRIP_SERVICE_URL=https://api.example.com ...
+   - Image scanning and registry push are your responsibility (e.g. Trivy in CI).
+
+===============================================================================
+ 12. SECURITY CHECKLIST (before production)
+===============================================================================
+   [ ] Replace SECRET_KEY, JWT_SECRET_KEY, INTERNAL_API_TOKEN with strong,
+       unique random values (32+ bytes). Source from your secrets manager,
+       NOT from committed files.
+   [ ] Set CORS_ORIGINS to the exact frontend origin(s); never * in prod.
+   [ ] Keep the AI Planner (Backend B) on the internal network only.
+   [ ] Terminate TLS at your ingress/LB; the apps speak plain HTTP behind it.
+   [ ] Use a managed PostgreSQL with least-privilege credentials + backups.
+   [ ] Run migrations as a controlled step (Job/initContainer) in prod.
+   [ ] Do not commit real .env files (see .gitignore).
+   [ ] Set resource limits and horizontal scaling in your orchestrator.
+
+===============================================================================
+ 13. SCALING & PERFORMANCE
+===============================================================================
+   - Both Flask services are stateless at the process level (Trip Service state
+     lives in Postgres) -> scale horizontally by adding replicas.
+   - Tune gunicorn via GUNICORN_WORKERS / GUNICORN_THREADS / GUNICORN_TIMEOUT.
+   - AI Planner calls can be slow; its gunicorn timeout defaults to 180s. Match
+     Trip Service AI_PLANNER_TIMEOUT and any ingress timeouts accordingly.
+   - Remember PROMETHEUS_MULTIPROC_DIR when running >1 worker (see §9).
+
+===============================================================================
+ 14. TROUBLESHOOTING
+===============================================================================
+   Symptom                          Likely cause / fix
+   -------------------------------  --------------------------------------------
+   Trip Service won't start,        DB unreachable. entrypoint retries `flask db
+   logs show migration retries      upgrade`. Check DATABASE_URL / DB health.
+   POST /trips/:id/plan -> 503      AI provider unreachable/misconfigured. Check
+                                    AI_PROVIDER + creds; is Ollama/OpenAI up?
+   POST /trips/:id/plan -> 502      AI Planner returned a bad/unparseable reply.
+                                    Check AI Planner logs; try a stronger model.
+   401 from AI Planner              INTERNAL_API_TOKEN mismatch between services.
+   Browser CORS errors              Set CORS_ORIGINS to the frontend origin.
+   /metrics shows only some data    Set PROMETHEUS_MULTIPROC_DIR (multi-worker).
+   Frontend calls wrong API host    VITE_TRIP_SERVICE_URL is baked at build time;
+                                    rebuild the frontend image with the right URL.
+
+===============================================================================
+ 15. VERIFICATION (what dev already validated)
+===============================================================================
+   - Trip Service: 17 pytest tests pass (SQLite, no external deps).
+   - AI Planner:   18 pytest tests pass (provider mocked).
+   - Frontend:     builds clean; component smoke tests pass.
+   - docker compose up: all 4 containers reach healthy; migrations apply to
+     real Postgres; register/login/create-trip/registry/metrics all verified;
+     nginx /api proxy verified; plan returns 503 without a live provider.
+===============================================================================

@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-planner-service
+  namespace: travel-planner
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: ai-planner-service
+
+  template:
+    metadata:
+      labels:
+        app: ai-planner-service
+
+    spec:
+      containers:
+        - name: ai-planner-service
+          image: ai-planner-service:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 5002
+
+          env:
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: APP_ENV
+
+            - name: PORT
+              value: "5002"
+
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: INTERNAL_API_TOKEN
+
+            - name: AI_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: AI_PROVIDER
+
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: OPENAI_API_KEY
+
+            - name: OPENAI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: OPENAI_MODEL
+
+            - name: OLLAMA_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: OLLAMA_URL
+
+            - name: OLLAMA_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: OLLAMA_MODEL
+
+            - name: AI_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: AI_TIMEOUT
+
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: LOG_LEVEL
+
+            - name: PROMETHEUS_MULTIPROC_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: PROMETHEUS_MULTIPROC_DIR
+
+          readinessProbe:
+            tcpSocket:
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+
+          livenessProbe:
+            tcpSocket:
+              port: 5002
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-service
+  namespace: travel-planner
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: trip-service
+
+  template:
+    metadata:
+      labels:
+        app: trip-service
+
+    spec:
+      containers:
+        - name: trip-service
+          image: trip-service:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 5001
+
+          env:
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: APP_ENV
+
+            - name: PORT
+              value: "5001"
+
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: SECRET_KEY
+
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: JWT_SECRET_KEY
+
+            - name: JWT_ACCESS_TOKEN_EXPIRES
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: JWT_ACCESS_TOKEN_EXPIRES
+
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: POSTGRES_PASSWORD
+
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: POSTGRES_DB
+
+            - name: POSTGRES_HOST
+              value: "postgres"
+
+            - name: POSTGRES_PORT
+              value: "5432"
+#            - name: DATABASE_URL
+#             value: "postgresql+psycopg2://travel:travel@postgres:5432/travel"
+
+            - name: AI_PLANNER_URL
+              value: "http://ai-planner-service:5002"
+
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: travel-planner-secret
+                  key: INTERNAL_API_TOKEN
+            - name: AI_TIMEOUT
+              value: "1000"
+              
+            - name: GUNICORN_TIMEOUT
+              value: "1000"
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: CORS_ORIGINS
+
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: LOG_LEVEL
+
+            - name: PROMETHEUS_MULTIPROC_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: travel-planner-config
+                  key: PROMETHEUS_MULTIPROC_DIR
+
+          readinessProbe:
+            tcpSocket:
+              port: 5001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+
+          livenessProbe:
+            tcpSocket:
+              port: 5001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

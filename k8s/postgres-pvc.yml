@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"PersistentVolumeClaim","metadata":{"annotations":{},"name":"postgres-pvc","namespace":"travel-planner"},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"5Gi"}}}}
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: k8s.io/minikube-hostpath
+    volume.kubernetes.io/storage-provisioner: k8s.io/minikube-hostpath
+  creationTimestamp: "2026-08-19T11:17:33Z"
+  finalizers:
+  - kubernetes.io/pvc-protection
+  name: postgres-pvc
+  namespace: travel-planner
+  resourceVersion: "1285"
+  uid: 40331299-d331-41c2-bac7-5f85b215b8bc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+  volumeMode: Filesystem
+  volumeName: pvc-40331299-d331-41c2-bac7-5f85b215b8bc
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 5Gi
+  phase: Bound
