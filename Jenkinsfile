@@ -5,6 +5,7 @@ pipeline {
         APP_VERSION = '1.0'
         APP_NAME = 'travel-planner'
         DOCKER_REPO = 'travel-planner'
+        FILE_TO_TEST = 'app.txt'
     }
 
     stages {
@@ -26,7 +27,7 @@ pipeline {
                 echo "Pipeline name: ${env.JOB_NAME}"
                 echo "Build number: ${env.BUILD_NUMBER}"
 
-                sh 'test -f app.txt'
+                sh 'python3 search_word.py "Travel"'
             }
         }
 
