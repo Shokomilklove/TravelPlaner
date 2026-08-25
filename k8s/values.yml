@@ -1,0 +1,53 @@
+grafana:
+  enabled: true
+
+  adminUser: admin
+  adminPassword: "change-me-now"
+
+  service:
+    type: ClusterIP
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  defaultDashboardsEnabled: true
+
+
+prometheus:
+  enabled: true
+
+  prometheusSpec:
+    retention: 1d
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+
+alertmanager:
+  enabled: true
+
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

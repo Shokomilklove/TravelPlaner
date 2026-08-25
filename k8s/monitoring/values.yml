@@ -1,0 +1,63 @@
+grafana:
+  enabled: true
+
+  adminUser: admin
+  adminPassword: "change-me-now"
+
+  service:
+    type: ClusterIP
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  defaultDashboardsEnabled: true
+
+  sidecar:
+    dashboards:
+      enabled: true
+    datasources:
+      enabled: true
+
+
+prometheus:
+  enabled: true
+
+  prometheusSpec:
+
+    retention: 1d
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+    additionalScrapeConfigs:
+      - job_name: "trip-service"
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - "trip-service.travel-planner.svc.cluster.local:5001"
+
+      - job_name: "ai-planner-service"
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - "ai-planner-service.travel-planner.svc.cluster.local:5002"
+
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
