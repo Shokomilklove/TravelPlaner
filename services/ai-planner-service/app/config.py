@@ -1,8 +1,15 @@
-"""AI Planner Service configuration (all values from environment variables).
+"""AI Planner Service configuration.
 
-Config class selected via ``APP_ENV``: development | staging | production | testing
+Configuration values are loaded from environment variables and .env.
+Config class selected via APP_ENV: development | staging | production | testing
 """
+
 import os
+
+from dotenv import load_dotenv
+
+# Load .env from the ai-planner-service project directory.
+load_dotenv()
 
 
 class Config:
@@ -10,7 +17,10 @@ class Config:
     SERVICE_VERSION = os.environ.get("SERVICE_VERSION", "1.0.0")
 
     # Shared secret required on every request (set by Trip Service).
-    INTERNAL_API_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "dev-internal-token")
+    INTERNAL_API_TOKEN = os.environ.get(
+        "INTERNAL_API_TOKEN",
+        "dev-internal-token",
+    )
 
     # Which LLM backend to use: "openai" or "ollama".
     AI_PROVIDER = os.environ.get("AI_PROVIDER", "openai").lower()
@@ -21,14 +31,27 @@ class Config:
     OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
 
     # --- Ollama ---
-    OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-    OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
+    OLLAMA_URL = os.environ.get(
+        "OLLAMA_URL",
+        "http://localhost:11434",
+    )
+    OLLAMA_MODEL = os.environ.get(
+        "OLLAMA_MODEL",
+        "llama3.1",
+    )
 
     # --- Generation tuning ---
-    AI_TIMEOUT = float(os.environ.get("AI_TIMEOUT", "90"))
-    AI_TEMPERATURE = float(os.environ.get("AI_TEMPERATURE", "0.7"))
-    # Corrective retries when the model returns unparseable JSON.
-    AI_MAX_RETRIES = int(os.environ.get("AI_MAX_RETRIES", "1"))
+    AI_TIMEOUT = float(
+        os.environ.get("AI_TIMEOUT", "90")
+    )
+
+    AI_TEMPERATURE = float(
+        os.environ.get("AI_TEMPERATURE", "0.7")
+    )
+
+    AI_MAX_RETRIES = int(
+        os.environ.get("AI_MAX_RETRIES", "1")
+    )
 
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
@@ -68,3 +91,4 @@ CONFIG_MAP = {
 def get_config():
     env = os.environ.get("APP_ENV", "development").strip().lower()
     return CONFIG_MAP.get(env, DevelopmentConfig)
+

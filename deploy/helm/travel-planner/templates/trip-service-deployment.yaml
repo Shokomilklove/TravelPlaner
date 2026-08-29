@@ -2,62 +2,109 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trip-service
+  namespace: {{ .Release.Namespace }}
   labels:
     app: trip-service
-    {{- include "tp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: travel-planner
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: Helm
+
 spec:
-  replicas: {{ .Values.tripService.replicas }}
+  replicas: 1
+
   selector:
     matchLabels:
       app: trip-service
+
   template:
     metadata:
       labels:
         app: trip-service
-        {{- include "tp.labels" . | nindent 8 }}
+        app.kubernetes.io/name: travel-planner
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/managed-by: Helm
+
     spec:
       securityContext:
         runAsNonRoot: true
-      {{- if .Values.migrations.enabled }}
+        runAsUser: 100
+        runAsGroup: 101
+
+      # ------------------------------------------------------------
+      # Database migration
+      # ------------------------------------------------------------
       initContainers:
         - name: migrate
-          image: {{ include "tp.image" (dict "root" $ "repo" .Values.tripService.repository) }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Wait for the DB, then apply migrations (idempotent). FLASK_APP is baked in.
-          command: ["sh", "-c", "until flask db upgrade; do echo 'waiting for db...'; sleep 3; done"]
+          image: trip-service:1.0.0
+          imagePullPolicy: Never
+
+          command:
+            - sh
+            - -c
+            - |
+              until flask db upgrade; do
+                echo "waiting for db..."
+                sleep 3
+              done
+
           envFrom:
             - configMapRef:
                 name: trip-service-config
             - secretRef:
-                name: {{ include "tp.secretName" . }}
-      {{- end }}
+                name: trip-service-secrets
+
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+
+            - name: POSTGRES_PORT
+              value: "5432"
+
+      # ------------------------------------------------------------
+      # Trip Service
+      # ------------------------------------------------------------
       containers:
         - name: trip-service
-          image: {{ include "tp.image" (dict "root" $ "repo" .Values.tripService.repository) }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: trip-service:1.0.0
+          imagePullPolicy: Never
+
           ports:
             - name: http
-              containerPort: {{ .Values.tripService.port }}
+              containerPort: 5001
+
           envFrom:
             - configMapRef:
                 name: trip-service-config
             - secretRef:
-                name: {{ include "tp.secretName" . }}
+                name: trip-service-secrets
+
+          env:
+            - name: POSTGRES_HOST
+              value: "postgres"
+
+            - name: POSTGRES_PORT
+              value: "5432"
+
           readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
+            tcpSocket:
+              port: 5001
             initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+
           livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          securityContext:
-            allowPrivilegeEscalation: false
-          {{- with .Values.tripService.resources }}
+            tcpSocket:
+              port: 5001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

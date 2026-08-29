@@ -1,0 +1,5 @@
+postgres:
+  password: "TpDb_9vK7!mQ2#xR8@L4"
+
+secrets:
+  internalApiToken: "rrI8J5dNkLNxTMnW4sPgSdGuoUarW3qw0UglxJx3vGM="

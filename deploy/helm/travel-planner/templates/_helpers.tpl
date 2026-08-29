@@ -33,7 +33,10 @@ trip-service-secrets
 {{/* DATABASE_URL: in-cluster postgres or external */}}
 {{- define "tp.databaseUrl" -}}
 {{- if .Values.postgres.enabled -}}
-{{- printf "postgresql+psycopg2://%s:%s@postgres:5432/%s" .Values.postgres.user .Values.postgres.password .Values.postgres.database -}}
+{{- $user := .Values.postgres.user | urlquery -}}
+{{- $password := .Values.postgres.password | urlquery -}}
+{{- $database := .Values.postgres.database | urlquery -}}
+{{- printf "postgresql+psycopg2://%s:%s@postgres:5432/%s" $user $password $database -}}
 {{- else -}}
 {{- .Values.externalDatabase.url -}}
 {{- end -}}

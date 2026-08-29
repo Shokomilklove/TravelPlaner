@@ -41,7 +41,6 @@ postgres:
   enabled: true
   image: postgres:16-alpine
   user: travel
-  password: travel
   database: travel
   storage: 5Gi
   resources: {}

@@ -77,10 +77,6 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
-
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
