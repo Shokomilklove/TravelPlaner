@@ -1,0 +1,206 @@
+pipeline {
+    agent any
+
+    environment {
+        NAMESPACE       = 'travel-planner'
+        HELM_CHART      = 'deploy/helm/travel-planner'
+
+        FRONTEND_IMAGE  = 'frontend'
+        TRIP_IMAGE      = 'trip-service'
+
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Frontend') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Building frontend:${IMAGE_TAG} ==="
+
+                    docker build \
+                        -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
+                        ./frontend
+
+                    docker image inspect ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('Build Trip Service') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Building trip-service:${IMAGE_TAG} ==="
+
+                    docker build \
+                        -t ${TRIP_IMAGE}:${IMAGE_TAG} \
+                        ./services/trip-service
+
+                    docker image inspect ${TRIP_IMAGE}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Trivy scan: frontend ==="
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        ${FRONTEND_IMAGE}:${IMAGE_TAG}
+
+                    echo "=== Trivy scan: trip-service ==="
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        ${TRIP_IMAGE}:${IMAGE_TAG}
+
+                    echo "=== Trivy scans passed ==="
+                '''
+            }
+        }
+
+        stage('Prepare Kubernetes') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Kubernetes connection ==="
+
+                    kubectl get nodes \
+                        --insecure-skip-tls-verify
+
+                    echo "=== Creating namespace if needed ==="
+
+                    kubectl create namespace ${NAMESPACE} \
+                        --dry-run=client \
+                        -o yaml | \
+                        kubectl apply -f - \
+                        --insecure-skip-tls-verify
+                '''
+            }
+        }
+
+        stage('Helm Deploy') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Deploying TravelPlanner ==="
+                    echo "Image tag: ${IMAGE_TAG}"
+
+                    helm upgrade --install travel-planner \
+                        ${HELM_CHART} \
+                        --namespace ${NAMESPACE} \
+                        --kube-insecure-skip-tls-verify \
+                        --set image.tag=${IMAGE_TAG} \
+                        --set image.pullPolicy=IfNotPresent \
+                        --wait \
+                        --timeout 5m
+
+                    echo "=== Helm deployment completed ==="
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Helm releases ==="
+
+                    helm list \
+                        -n ${NAMESPACE} \
+                        --kube-insecure-skip-tls-verify
+
+                    echo "=== Pods ==="
+
+                    kubectl get pods \
+                        -n ${NAMESPACE} \
+                        -o wide \
+                        --insecure-skip-tls-verify
+
+                    echo "=== Services ==="
+
+                    kubectl get svc \
+                        -n ${NAMESPACE} \
+                        --insecure-skip-tls-verify
+
+                    echo "=== Deployments ==="
+
+                    kubectl get deployments \
+                        -n ${NAMESPACE} \
+                        --insecure-skip-tls-verify
+
+                    echo "=== Waiting for frontend ==="
+
+                    kubectl rollout status \
+                        deployment/frontend \
+                        -n ${NAMESPACE} \
+                        --timeout=180s \
+                        --insecure-skip-tls-verify
+
+                    echo "=== Waiting for trip-service ==="
+
+                    kubectl rollout status \
+                        deployment/trip-service \
+                        -n ${NAMESPACE} \
+                        --timeout=180s \
+                        --insecure-skip-tls-verify
+
+                    echo "================================="
+                    echo " TravelPlanner deployment SUCCESS "
+                    echo "================================="
+                '''
+            }
+        }
+    }
+
+    post {
+
+        always {
+            echo "Jenkins pipeline finished."
+        }
+
+        success {
+            echo "TravelPlanner CI/CD completed successfully."
+        }
+
+        failure {
+            echo "Pipeline failed."
+
+            sh '''
+                echo "=== Pods ==="
+
+                kubectl get pods \
+                    -n ${NAMESPACE} \
+                    -o wide \
+                    --insecure-skip-tls-verify || true
+
+                echo "=== Events ==="
+
+                kubectl get events \
+                    -n ${NAMESPACE} \
+                    --sort-by=.lastTimestamp \
+                    --insecure-skip-tls-verify \
+                    | tail -30 || true
+            '''
+        }
+    }
+}
