@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     environment {
-        NAMESPACE       = 'travel-planner'
-        HELM_CHART      = 'deploy/helm/travel-planner'
+        NAMESPACE      = 'travel-planner'
+        HELM_CHART     = 'deploy/helm/travel-planner'
 
-        FRONTEND_IMAGE  = 'frontend'
-        TRIP_IMAGE      = 'trip-service'
+        FRONTEND_IMAGE = 'frontend'
+        TRIP_IMAGE     = 'trip-service'
 
-        IMAGE_TAG       = "${BUILD_NUMBER}"
+        IMAGE_TAG      = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -85,7 +85,7 @@ pipeline {
                     kubectl get nodes \
                         --insecure-skip-tls-verify
 
-                    echo "=== Creating namespace if needed ==="
+                    echo "=== Creating namespace ==="
 
                     kubectl create namespace ${NAMESPACE} \
                         --dry-run=client \
@@ -173,7 +173,6 @@ pipeline {
     }
 
     post {
-
         always {
             echo "Jenkins pipeline finished."
         }
