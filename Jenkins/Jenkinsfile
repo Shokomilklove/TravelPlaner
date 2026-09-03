@@ -75,6 +75,31 @@ pipeline {
             }
         }
 
+        stage('Load Images into Minikube') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Loading frontend:${IMAGE_TAG} into Minikube ==="
+
+                    docker save ${FRONTEND_IMAGE}:${IMAGE_TAG} | \
+                        docker exec -i minikube docker load
+
+                    echo "=== Loading trip-service:${IMAGE_TAG} into Minikube ==="
+
+                    docker save ${TRIP_IMAGE}:${IMAGE_TAG} | \
+                        docker exec -i minikube docker load
+
+                    echo "=== Verifying images in Minikube ==="
+
+                    docker exec minikube docker images \
+                        | grep -E "frontend|trip-service"
+
+                    echo "=== Images successfully loaded into Minikube ==="
+                '''
+            }
+        }
+
         stage('Prepare Kubernetes') {
             steps {
                 sh '''
