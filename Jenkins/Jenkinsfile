@@ -10,7 +10,7 @@ pipeline {
 
         IMAGE_TAG      = "${BUILD_NUMBER}"
 
-        GIT_BRANCH     = 'main'
+        GIT_BRANCH     = 'master'
     }
 
     stages {
