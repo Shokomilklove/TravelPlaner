@@ -18,6 +18,19 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+
+                sh '''
+                    set -e
+
+                    echo "=== Git information ==="
+
+                    git status
+                    git branch -a
+                    git log -1 --oneline
+
+                    echo "=== Current commit ==="
+                    git rev-parse HEAD
+                '''
             }
         }
 
@@ -33,6 +46,8 @@ pipeline {
                         ./frontend
 
                     docker image inspect ${FRONTEND_IMAGE}:${IMAGE_TAG}
+
+                    echo "=== Frontend image built successfully ==="
                 '''
             }
         }
@@ -49,6 +64,8 @@ pipeline {
                         ./services/trip-service
 
                     docker image inspect ${TRIP_IMAGE}:${IMAGE_TAG}
+
+                    echo "=== Trip-service image built successfully ==="
                 '''
             }
         }
@@ -94,8 +111,8 @@ pipeline {
 
                     echo "=== Verifying images in Minikube ==="
 
-                    docker exec minikube docker images \
-                        | grep -E "frontend|trip-service"
+                    docker exec minikube docker images | \
+                        grep -E "frontend|trip-service"
 
                     echo "=== Images successfully loaded ==="
                 '''
@@ -110,10 +127,10 @@ pipeline {
                     echo "=== Updating Helm image tag ==="
 
                     sed -i \
-                        's/^  tag: .*/  tag: "'${IMAGE_TAG}'"/' \
+                        "s/^  tag: .*/  tag: \\"${IMAGE_TAG}\\"/" \
                         ${HELM_CHART}/values.yaml
 
-                    echo "=== New image tag ==="
+                    echo "=== New image configuration ==="
 
                     grep -A2 "^image:" \
                         ${HELM_CHART}/values.yaml
@@ -125,51 +142,111 @@ pipeline {
             }
         }
 
-        stage('Commit GitOps Change') {
+        stage('Validate Helm') {
             steps {
                 sh '''
                     set -e
 
-                    git config user.name "Jenkins"
-                    git config user.email "jenkins@local"
+                    echo "=== Helm lint ==="
 
-                    git add ${HELM_CHART}/values.yaml
+                    helm lint ${HELM_CHART}
 
-                    if git diff --cached --quiet; then
-                        echo "No GitOps changes to commit."
-                        exit 0
-                    fi
+                    echo "=== Helm template ==="
 
-                    git commit \
-                        -m "chore: deploy TravelPlanner ${IMAGE_TAG}"
+                    helm template \
+                        travel-planner \
+                        ${HELM_CHART} \
+                        --namespace ${NAMESPACE} \
+                        > /tmp/helm-rendered.yaml
 
-                    echo "=== Git commit created ==="
+                    echo "=== Helm validation successful ==="
+
+                    echo "=== Images in rendered manifests ==="
+
+                    grep "image:" /tmp/helm-rendered.yaml
                 '''
+            }
+        }
+
+        stage('Commit GitOps Change') {
+            steps {
+                script {
+                    sh '''
+                        set -e
+
+                        git config user.name "Jenkins"
+                        git config user.email "jenkins@local"
+
+                        git add ${HELM_CHART}/values.yaml
+
+                        echo "=== Checking Git changes ==="
+
+                        if git diff --cached --quiet; then
+                            echo "No GitOps changes to commit."
+                        else
+                            git commit \
+                                -m "chore: deploy TravelPlanner ${IMAGE_TAG}"
+
+                            echo "=== Git commit created ==="
+                            git log -1 --oneline
+                        fi
+                    '''
+                }
             }
         }
 
         stage('Push GitOps Change') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-push',
-                    usernameVariable: 'GIT_USERNAME',
-                    passwordVariable: 'GIT_PASSWORD'
-                )]) {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'github-push',
+                        usernameVariable: 'GIT_USERNAME',
+                        passwordVariable: 'GIT_PASSWORD'
+                    )
+                ]) {
                     sh '''
                         set -e
 
-                        echo "=== Pushing GitOps change ==="
+                        echo "=== Preparing GitHub push ==="
 
-                        git branch -f master HEAD
+                        git branch -f ${GIT_BRANCH} HEAD
 
-                        git config credential.helper store
-                        printf "https://%s:%s@github.com\\n" "$GIT_USERNAME" "$GIT_PASSWORD" > ~/.git-credentials
+                        echo "=== Current branch ==="
+                        git branch --show-current
 
-                        git push origin master
+                        echo "=== Current commit ==="
+                        git rev-parse HEAD
 
-                        rm -f ~/.git-credentials
+                        echo "=== Configuring Git authentication ==="
 
-                        echo "=== GitOps change pushed ==="
+                        cat > /tmp/git-askpass.sh <<'EOF'
+#!/bin/sh
+
+case "$1" in
+    *Username*)
+        echo "$GIT_USERNAME"
+        ;;
+    *Password*)
+        echo "$GIT_PASSWORD"
+        ;;
+esac
+EOF
+
+                        chmod 700 /tmp/git-askpass.sh
+
+                        export GIT_ASKPASS=/tmp/git-askpass.sh
+                        export GIT_TERMINAL_PROMPT=0
+
+                        echo "=== Pushing GitOps change to GitHub ==="
+
+                        git push origin ${GIT_BRANCH}
+
+                        echo "=== GitHub push successful ==="
+
+                        rm -f /tmp/git-askpass.sh
+
+                        unset GIT_ASKPASS
+                        unset GIT_TERMINAL_PROMPT
                     '''
                 }
             }
@@ -184,8 +261,8 @@ pipeline {
 
                     sleep 15
 
-                    echo "Argo CD will reconcile the Git change."
-                    echo "Deployment is now controlled by Argo CD."
+                    echo "=== Argo CD will reconcile the Git change ==="
+                    echo "=== Deployment is controlled by Argo CD ==="
                 '''
             }
         }
@@ -200,14 +277,19 @@ pipeline {
         success {
             echo "======================================"
             echo " TravelPlanner CI SUCCESS"
-            echo " GitOps change pushed to GitHub"
-            echo " Argo CD will deploy the new version"
+            echo "======================================"
+            echo " Frontend image: frontend:${IMAGE_TAG}"
+            echo " Trip image:     trip-service:${IMAGE_TAG}"
+            echo " GitOps change:  pushed to GitHub"
+            echo " Argo CD:        will deploy the change"
             echo "======================================"
         }
 
         failure {
             echo "======================================"
             echo " TravelPlanner CI FAILED"
+            echo "======================================"
+            echo " Check the Jenkins console output."
             echo "======================================"
         }
     }
