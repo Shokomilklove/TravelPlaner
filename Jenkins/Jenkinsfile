@@ -9,6 +9,8 @@ pipeline {
         TRIP_IMAGE     = 'trip-service'
 
         IMAGE_TAG      = "${BUILD_NUMBER}"
+
+        GIT_BRANCH     = 'master'
     }
 
     stages {
@@ -95,136 +97,105 @@ pipeline {
                     docker exec minikube docker images \
                         | grep -E "frontend|trip-service"
 
-                    echo "=== Images successfully loaded into Minikube ==="
+                    echo "=== Images successfully loaded ==="
                 '''
             }
         }
 
-        stage('Prepare Kubernetes') {
+        stage('Update GitOps Manifest') {
             steps {
                 sh '''
                     set -e
 
-                    echo "=== Kubernetes connection ==="
+                    echo "=== Updating Helm image tag ==="
 
-                    kubectl get nodes \
-                        --insecure-skip-tls-verify
+                    sed -i \
+                        's/^  tag: .*/  tag: "'${IMAGE_TAG}'"/' \
+                        ${HELM_CHART}/values.yaml
 
-                    echo "=== Creating namespace ==="
+                    echo "=== New image tag ==="
 
-                    kubectl create namespace ${NAMESPACE} \
-                        --dry-run=client \
-                        -o yaml | \
-                        kubectl apply -f - \
-                        --insecure-skip-tls-verify
+                    grep -A2 "^image:" \
+                        ${HELM_CHART}/values.yaml
+
+                    echo "=== Git diff ==="
+
+                    git diff -- ${HELM_CHART}/values.yaml
                 '''
             }
         }
 
-        stage('Helm Deploy') {
+        stage('Commit GitOps Change') {
             steps {
                 sh '''
                     set -e
 
-                    echo "=== Deploying TravelPlanner ==="
-                    echo "Image tag: ${IMAGE_TAG}"
+                    git config user.name "Jenkins"
+                    git config user.email "jenkins@local"
 
-                    helm upgrade --install travel-planner \
-                        ${HELM_CHART} \
-                        --namespace ${NAMESPACE} \
-                        --kube-insecure-skip-tls-verify \
-                        --set image.tag=${IMAGE_TAG} \
-                        --set image.pullPolicy=IfNotPresent \
-                        --wait \
-                        --timeout 5m
+                    git add ${HELM_CHART}/values.yaml
 
-                    echo "=== Helm deployment completed ==="
+                    if git diff --cached --quiet; then
+                        echo "No GitOps changes to commit."
+                        exit 0
+                    fi
+
+                    git commit \
+                        -m "chore: deploy TravelPlanner ${IMAGE_TAG}"
+
+                    echo "=== Git commit created ==="
                 '''
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Push GitOps Change') {
             steps {
                 sh '''
                     set -e
 
-                    echo "=== Helm releases ==="
+                    echo "=== Pushing GitOps change ==="
 
-                    helm list \
-                        -n ${NAMESPACE} \
-                        --kube-insecure-skip-tls-verify
+                    git push origin ${GIT_BRANCH}
 
-                    echo "=== Pods ==="
+                    echo "=== GitOps change pushed ==="
+                '''
+            }
+        }
 
-                    kubectl get pods \
-                        -n ${NAMESPACE} \
-                        -o wide \
-                        --insecure-skip-tls-verify
+        stage('Wait for Argo CD') {
+            steps {
+                sh '''
+                    set -e
 
-                    echo "=== Services ==="
+                    echo "=== Waiting for Argo CD ==="
 
-                    kubectl get svc \
-                        -n ${NAMESPACE} \
-                        --insecure-skip-tls-verify
+                    sleep 15
 
-                    echo "=== Deployments ==="
-
-                    kubectl get deployments \
-                        -n ${NAMESPACE} \
-                        --insecure-skip-tls-verify
-
-                    echo "=== Waiting for frontend ==="
-
-                    kubectl rollout status \
-                        deployment/frontend \
-                        -n ${NAMESPACE} \
-                        --timeout=180s \
-                        --insecure-skip-tls-verify
-
-                    echo "=== Waiting for trip-service ==="
-
-                    kubectl rollout status \
-                        deployment/trip-service \
-                        -n ${NAMESPACE} \
-                        --timeout=180s \
-                        --insecure-skip-tls-verify
-
-                    echo "================================="
-                    echo " TravelPlanner deployment SUCCESS "
-                    echo "================================="
+                    echo "Argo CD will reconcile the Git change."
+                    echo "Deployment is now controlled by Argo CD."
                 '''
             }
         }
     }
 
     post {
+
         always {
-            echo "Jenkins pipeline finished."
+            echo "Jenkins CI pipeline finished."
         }
 
         success {
-            echo "TravelPlanner CI/CD completed successfully."
+            echo "======================================"
+            echo " TravelPlanner CI SUCCESS"
+            echo " GitOps change pushed to GitHub"
+            echo " Argo CD will deploy the new version"
+            echo "======================================"
         }
 
         failure {
-            echo "Pipeline failed."
-
-            sh '''
-                echo "=== Pods ==="
-
-                kubectl get pods \
-                    -n ${NAMESPACE} \
-                    -o wide \
-                    --insecure-skip-tls-verify || true
-
-                echo "=== Events ==="
-
-                kubectl get events \
-                    -n ${NAMESPACE} \
-                    --sort-by=.lastTimestamp \
-                    --insecure-skip-tls-verify \
-                    | tail -30 || true
-            '''
+            echo "======================================"
+            echo " TravelPlanner CI FAILED"
+            echo "======================================"
         }
     }
 }
