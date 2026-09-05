@@ -150,16 +150,28 @@ pipeline {
 
         stage('Push GitOps Change') {
             steps {
-                sh '''
-                    set -e
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-push',
+                    usernameVariable: 'GIT_USERNAME',
+                    passwordVariable: 'GIT_PASSWORD'
+                )]) {
+                    sh '''
+                        set -e
 
-                    echo "=== Pushing GitOps change ==="
+                        echo "=== Pushing GitOps change ==="
 
-                    git branch -f master HEAD
-                    git push origin master
+                        git branch -f master HEAD
 
-                    echo "=== GitOps change pushed ==="
-                '''
+                        git config credential.helper store
+                        printf "https://%s:%s@github.com\\n" "$GIT_USERNAME" "$GIT_PASSWORD" > ~/.git-credentials
+
+                        git push origin master
+
+                        rm -f ~/.git-credentials
+
+                        echo "=== GitOps change pushed ==="
+                    '''
+                }
             }
         }
 
