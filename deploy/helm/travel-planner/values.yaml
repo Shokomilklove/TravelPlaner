@@ -10,7 +10,7 @@ fullnameOverride: ""
 # Leave `registry` empty for local clusters where images are loaded by name.
 image:
   registry: ""            # e.g. 123456789.dkr.ecr.eu-west-1.amazonaws.com/travel-planner
-  tag: "1.0.0"
+  tag: "7"
   pullPolicy: IfNotPresent
 
 appEnv: production          # development | staging | production
