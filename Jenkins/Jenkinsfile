@@ -155,7 +155,8 @@ pipeline {
 
                     echo "=== Pushing GitOps change ==="
 
-                    git push origin ${GIT_BRANCH}
+                    git branch -f master HEAD
+                    git push origin master
 
                     echo "=== GitOps change pushed ==="
                 '''
