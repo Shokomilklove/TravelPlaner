@@ -21,8 +21,8 @@ logLevel: INFO
 # or point at an existing Secret you manage (existingSecret) that contains:
 #   SECRET_KEY, JWT_SECRET_KEY, INTERNAL_API_TOKEN, DATABASE_URL
 secrets:
-  create: true
-  existingSecret: ""
+  create: false
+  existingSecret: "trip-service-secrets"
   secretKey: "CHANGE_ME_flask_secret"
   jwtSecretKey: "CHANGE_ME_jwt_secret"
   internalApiToken: "CHANGE_ME_internal_token"   # MUST match your local Service B

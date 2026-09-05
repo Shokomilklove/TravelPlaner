@@ -35,7 +35,7 @@ spec:
       # ------------------------------------------------------------
       initContainers:
         - name: migrate
-          image: trip-service:1.0.0
+          image: {{ include "tp.image" (dict "root" . "repo" .Values.tripService.repository) }}
           imagePullPolicy: Never
 
           command:
@@ -65,7 +65,7 @@ spec:
       # ------------------------------------------------------------
       containers:
         - name: trip-service
-          image: trip-service:1.0.0
+          image: {{ include "tp.image" (dict "root" . "repo" .Values.tripService.repository) }}
           imagePullPolicy: Never
 
           ports:
@@ -76,7 +76,7 @@ spec:
             - configMapRef:
                 name: trip-service-config
             - secretRef:
-                name: trip-service-secrets
+                name: {{ include "tp.secretName" . }}
 
           env:
             - name: POSTGRES_HOST

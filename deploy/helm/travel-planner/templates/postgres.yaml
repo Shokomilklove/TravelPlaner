@@ -51,7 +51,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: trip-service-secrets
+                  name:  {{ include "tp.secretName" . }}
                   key: POSTGRES_PASSWORD
 
             - name: POSTGRES_DB

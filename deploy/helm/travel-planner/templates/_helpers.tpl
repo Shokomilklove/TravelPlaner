@@ -29,15 +29,3 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 trip-service-secrets
 {{- end -}}
 {{- end -}}
-
-{{/* DATABASE_URL: in-cluster postgres or external */}}
-{{- define "tp.databaseUrl" -}}
-{{- if .Values.postgres.enabled -}}
-{{- $user := .Values.postgres.user | urlquery -}}
-{{- $password := .Values.postgres.password | urlquery -}}
-{{- $database := .Values.postgres.database | urlquery -}}
-{{- printf "postgresql+psycopg2://%s:%s@postgres:5432/%s" $user $password $database -}}
-{{- else -}}
-{{- .Values.externalDatabase.url -}}
-{{- end -}}
-{{- end -}}
