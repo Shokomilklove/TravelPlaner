@@ -1,0 +1,303 @@
+The following tools must be installed on Windows:
+docker 
+minikube
+kubectl client
+helm 
+Node.js + npm
+git 
+ollama 
+
+1.
+cd C:\docker-labs git 
+clone https://github.com/Shokomilklove/TravelPlaner.git 
+cd TravelPlaner
+
+2.
+git branch
+
+master
+
+3.Create a Minikube Cluster
+minikube start --driver=docker
+minikube status
+
+4.Create the Application Namespace
+kubectl create namespace travel-planner
+kubectl get namespaces
+
+*Create the Kubernetes Secret* #hand solution only for local build
+The application uses an external Kubernetes Secret.
+The Secret name is:
+trip-service-secrets
+Create it:
+kubectl create secret generic trip-service-secrets `
+  -n travel-planner `
+  --from-literal=POSTGRES_USER=travel `
+  --from-literal=POSTGRES_PASSWORD='YOUR_DATABASE_PASSWORD' `
+  --from-literal=POSTGRES_DB=travel `
+  --from-literal=SECRET_KEY='YOUR_SECRET_KEY' `
+  --from-literal=JWT_SECRET_KEY='YOUR_JWT_SECRET' `
+  --from-literal=INTERNAL_API_TOKEN='YOUR_INTERNAL_TOKEN'
+Replace the placeholder values with your actual local values.
+
+*Create DATABASE_UR*
+Get the Secret:
+$secret = kubectl get secret trip-service-secrets `
+  -n travel-planner `
+  -o json | ConvertFrom-Json
+Read the required values:
+$user = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($secret.data.POSTGRES_USER)
+)
+$password = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($secret.data.POSTGRES_PASSWORD)
+)
+$db = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($secret.data.POSTGRES_DB)
+)
+Build the connection string:
+$url = "postgresql+psycopg2://{0}:{1}@postgres:5432/{2}" -f `
+    [uri]::EscapeDataString($user),
+    [uri]::EscapeDataString($password),
+    [uri]::EscapeDataString($db)
+Encode it:
+
+$encoded = [Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes($url)
+)
+
+Patch the Secret:
+kubectl patch secret trip-service-secrets `
+  -n travel-planner `
+  --type merge `
+  -p (@{
+      data = @{
+          DATABASE_URL = $encoded
+      }
+  } | ConvertTo-Json -Compress)
+Check the Secret again:
+kubectl get secret trip-service-secrets -n travel-planner
+
+5. Validate the Helm Chart
+cd C:\docker-labs\TravelPlanner
+helm lint .\deploy\helm\travel-planner
+
+6. Build the Docker Images
+docker build ` -t frontend:1.0.0 ` .\frontend
+docker images frontend
+docker build ` -t trip-service:1.0.0 ` .\services\trip-service
+docker images trip-service
+docker build ` -t ai-planner-service:1.0.0 ` .\services\ai-planner-service
+docker images
+
+7.Load Application Images into Minikube
+minikube image load frontend:1.0.0
+minikube image load trip-service:1.0.0
+minikube image ls | Select-String "frontend|trip-service"
+
+8.Start Ollama
+ollama list
+ollama pull llama3.2:3b
+ollama serve
+curl http://localhost:11434/api/tags
+
+9. Start AI Planner
+docker compose up -d ai-planner-service
+docker compose ps
+curl http://localhost:5002/health
+docker compose logs ai-planner-service
+
+10. Install TravelPlanner with Helm
+Make sure the Secret exists:
+kubectl get secret trip-service-secrets -n travel-planner
+Install the application:
+helm upgrade --install travel-planner ` .\deploy\helm\travel-planner ` -n travel-planner ` -f .\deploy\helm\travel-planner\values.yaml
+helm list -n travel-planner
+
+11. Enable Minikube Ingress
+minikube addons enable ingress
+Configure the Local Hostname:
+kubectl get ingress -n travel-planner
+travel-planner.local
+notepad C:\Windows\System32\drivers\etc\hosts
+127.0.0.1 travel-planner.local
+
+12.Install Prometheus and Grafana
+helm repo add prometheus-community ` https://prometheus-community.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+helm upgrade --install monitoring ` prometheus-community/kube-prometheus-stack ` -n monitoring
+helm list -n monitoring
+kubectl get pods -n monitoring
+
+13. Open Grafana
+kubectl get svc -n monitoring
+kubectl get endpoints monitoring-grafana -n monitoring
+kubectl port-forward ` -n monitoring ` svc/monitoring-grafana ` 3000:80
+http://localhost:3000
+
+Get the Grafana Password:
+kubectl get secret monitoring-grafana `
+  -n monitoring `
+  -o jsonpath="{.data.admin-password}" |
+% {
+    [System.Text.Encoding]::UTF8.GetString(
+        [System.Convert]::FromBase64String($_)
+    )
+}
+Username:
+admin
+
+Find Prometheus:
+kubectl get svc -n monitoring |
+Select-String prometheus
+Port-forward:
+
+kubectl port-forward `
+  -n monitoring `
+  svc/monitoring-kube-prometheus-prometheus `
+  9090:9090
+
+Open:
+http://localhost:9090
+
+14. Install Loki
+helm list -A
+helm list -n loki
+kubectl get pods -n loki
+helm repo add grafana-community ` https://grafana-community.github.io/helm-charts
+helm repo update
+kubectl create namespace loki
+helm upgrade --install loki ` grafana-community/loki ` -n loki
+
+15. Check Alloy
+helm list -A
+kubectl get pods -A | Select-String alloy
+Kubernetes containers │ ▼ Alloy │ ▼ Loki │ ▼ Grafana
+
+16.Configure Loki in Grafana
+Connections ↓ Data sources ↓ Add data source ↓ Loki
+kubectl get svc -n loki
+
+17. Prometheus
+kubectl get svc -n monitoring | Select-String prometheus
+Port-forward:
+
+kubectl port-forward `
+  -n monitoring `
+  svc/monitoring-kube-prometheus-prometheus `
+  9090:9090
+
+http://localhost:9090
+
+18. Jenkins
+docker build ` -t travel-planner-jenkins:latest ` -f Jenkins/Dockerfile ` .
+docker network create jenkins
+docker run -d ` --name jenkins ` --restart=unless-stopped ` --network jenkins ` -p 8080:8080 ` -p 50000:50000 ` -v jenkins_home:/var/jenkins_home ` -v //var/run/docker.sock:/var/run/docker.sock ` -v "$HOME/.kube:/tmp/kube:ro" ` travel-planner-jenkins:latest
+http://localhost:8080
+
+Give Jenkins Access to Docker:
+docker exec -u root jenkins ` sh -c "usermod -aG 0 jenkins"
+docker restart jenkins
+docker exec jenkins docker ps
+
+Give Jenkins Access to Minikube:
+Copy the Minikube CA certificate:
+docker cp `
+  "$HOME\.minikube\ca.crt" `
+  jenkins:/var/jenkins_home/.kube/minikube/ca.crt
+
+Test:
+docker exec jenkins kubectl get nodes `
+  --insecure-skip-tls-verify
+
+Test Helm:
+docker exec jenkins helm list -A `
+  --kube-insecure-skip-tls-verify
+  
+Configure GitHub Credentials in Jenkins:
+Manage Jenkins
+    ↓
+Credentials
+
+Create:
+ID: github-push
+
+Type:
+Username with password
+
+Username:
+.....GitHub Personal Username
+
+Password:
+GitHub Personal Access Token
+The token must have permission to push to the repository.
+
+Create the Jenkins Pipeline:
+In Jenkins:
+New Item
+
+Name:
+TravelPlanner
+
+Select:
+Pipeline
+
+Choose:
+Pipeline script from SCM
+
+SCM:
+Git
+
+Repository:
+https://github.com/.....
+
+Branch:
+*/master
+
+Script Path:
+Jenkins/Jenkinsfile
+Save.
+
+19. Argo CD
+kubectl create namespace argocd
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo update
+helm upgrade --install argocd ` argo/argo-cd ` -n argocd
+kubectl get pods -n argocd
+
+Open Argo CD:
+kubectl port-forward ` svc/argocd-server ` -n argocd ` 8081:443
+https://localhost:8081
+
+Get Argo CD Admin Password:
+kubectl -n argocd `
+  get secret argocd-initial-admin-secret `
+  -o jsonpath="{.data.password}" |
+% {
+    [Text.Encoding]::UTF8.GetString(
+        [Convert]::FromBase64String($_)
+    )
+}
+
+Login:
+admin
+
+Configure the Argo CD Application:
+The application should point to:
+
+Repository:
+https://github.com/.....git
+
+Branch:
+master
+
+Path:
+deploy/helm/travel-planner
+
+Namespace:
+travel-planner
+
+The Helm values file is:
+values.yaml
+

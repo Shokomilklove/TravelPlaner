@@ -36,7 +36,7 @@ spec:
       initContainers:
         - name: migrate
           image: {{ include "tp.image" (dict "root" . "repo" .Values.tripService.repository) }}
-          imagePullPolicy: Never
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
 
           command:
             - sh
