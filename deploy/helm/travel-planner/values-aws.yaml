@@ -1,0 +1,58 @@
+appEnv: production
+logLevel: INFO
+
+image:
+  registry: ""
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+secrets:
+  create: false
+  existingSecret: "trip-service-secrets"
+
+aiPlanner:
+  url: "http://CHANGE_ME:5002"
+  timeout: 120
+
+postgres:
+  enabled: false
+  user: travel
+  database: travel
+  host: "10.0.2.100"
+  port: 5432
+
+externalDatabase:
+  url: ""
+
+tripService:
+  repository: trip-service
+  replicas: 2
+  port: 5001
+  corsOrigins: "*"
+
+frontend:
+  repository: frontend
+  replicas: 2
+  port: 80
+
+migrations:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: traefik
+  host: ""
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+    clusterIssuer: ""
+
+certIssuer:
+  create: false
+
+serviceMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: false

@@ -29,3 +29,12 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 trip-service-secrets
 {{- end -}}
 {{- end -}}
+
+{{/* Build DATABASE_URL for external PostgreSQL */}}
+{{- define "tp.databaseUrl" -}}
+{{- if .Values.postgres.enabled -}}
+{{- printf "postgresql+psycopg2://%s:%s@postgres:5432/%s" .Values.postgres.user .Values.postgres.password .Values.postgres.database -}}
+{{- else -}}
+{{- printf "postgresql+psycopg2://%s:${POSTGRES_PASSWORD}@%s:%v/%s" .Values.postgres.user .Values.postgres.host .Values.postgres.port .Values.postgres.database -}}
+{{- end -}}
+{{- end -}}

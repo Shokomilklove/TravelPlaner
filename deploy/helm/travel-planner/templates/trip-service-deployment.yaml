@@ -50,15 +50,34 @@ spec:
           envFrom:
             - configMapRef:
                 name: trip-service-config
-            - secretRef:
-                name: trip-service-secrets
 
           env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_PASSWORD
+
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_DB
+
             - name: POSTGRES_HOST
-              value: "postgres"
+              value: {{ .Values.postgres.host | quote }}
 
             - name: POSTGRES_PORT
               value: "5432"
+
+            - name: DATABASE_URL
+              value: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
 
       # ------------------------------------------------------------
       # Trip Service
@@ -75,15 +94,52 @@ spec:
           envFrom:
             - configMapRef:
                 name: trip-service-config
-            - secretRef:
-                name: {{ include "tp.secretName" . }}
 
           env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_USER
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_PASSWORD
+
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: POSTGRES_DB
+
             - name: POSTGRES_HOST
-              value: "postgres"
+              value: {{ .Values.postgres.host | quote }}
 
             - name: POSTGRES_PORT
               value: "5432"
+
+            - name: DATABASE_URL
+              value: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)"
+
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: SECRET_KEY
+
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: JWT_SECRET_KEY
+
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tp.secretName" . }}
+                  key: INTERNAL_API_TOKEN
 
           readinessProbe:
             tcpSocket:
