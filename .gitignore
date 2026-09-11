@@ -30,3 +30,11 @@ terraform.tfstate.backup
 # Local Docker image archives
 Terraform/*.tar
 *.tar
+# Terraform
+Terraform/.terraform/
+# Terraform crash logs
+Terraform/crash.log
+Terraform/crash.*.log
+
+# Local Terraform plan files
+Terraform/*.tfplan
