@@ -24,3 +24,9 @@ prometheus_multiproc/
 .idea/
 .DS_Store
 Thumbs.db
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+# Local Docker image archives
+Terraform/*.tar
+*.tar
