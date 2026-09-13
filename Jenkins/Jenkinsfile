@@ -5,12 +5,16 @@ pipeline {
         NAMESPACE      = 'travel-planner'
         HELM_CHART     = 'deploy/helm/travel-planner'
 
+        DOCKER_REGISTRY = 'docker.io/shokomilklove'
+
         FRONTEND_IMAGE = 'frontend'
         TRIP_IMAGE     = 'trip-service'
 
         IMAGE_TAG      = "${BUILD_NUMBER}"
 
-        GIT_BRANCH     = 'master'
+        GIT_BRANCH     = 'aws-deployment'
+
+        AI_PLANNER_TIMEOUT = '300'
     }
 
     stages {
@@ -42,10 +46,11 @@ pipeline {
                     echo "=== Building frontend:${IMAGE_TAG} ==="
 
                     docker build \
-                        -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
+                        -t ${DOCKER_REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG} \
                         ./frontend
 
-                    docker image inspect ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                    docker image inspect \
+                        ${DOCKER_REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG}
 
                     echo "=== Frontend image built successfully ==="
                 '''
@@ -60,10 +65,11 @@ pipeline {
                     echo "=== Building trip-service:${IMAGE_TAG} ==="
 
                     docker build \
-                        -t ${TRIP_IMAGE}:${IMAGE_TAG} \
+                        -t ${DOCKER_REGISTRY}/${TRIP_IMAGE}:${IMAGE_TAG} \
                         ./services/trip-service
 
-                    docker image inspect ${TRIP_IMAGE}:${IMAGE_TAG}
+                    docker image inspect \
+                        ${DOCKER_REGISTRY}/${TRIP_IMAGE}:${IMAGE_TAG}
 
                     echo "=== Trip-service image built successfully ==="
                 '''
@@ -80,64 +86,86 @@ pipeline {
                     trivy image \
                         --severity HIGH,CRITICAL \
                         --ignore-unfixed \
-                        ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                        ${DOCKER_REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG}
 
                     echo "=== Trivy scan: trip-service ==="
 
                     trivy image \
                         --severity HIGH,CRITICAL \
                         --ignore-unfixed \
-                        ${TRIP_IMAGE}:${IMAGE_TAG}
+                        ${DOCKER_REGISTRY}/${TRIP_IMAGE}:${IMAGE_TAG}
 
                     echo "=== Trivy scans passed ==="
                 '''
             }
         }
 
-        stage('Load Images into Minikube') {
+        stage('Push Images to Docker Hub') {
             steps {
-                sh '''
-                    set -e
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -e
 
-                    echo "=== Loading frontend:${IMAGE_TAG} into Minikube ==="
+                        echo "=== Logging in to Docker Hub ==="
 
-                    docker save ${FRONTEND_IMAGE}:${IMAGE_TAG} | \
-                        docker exec -i minikube docker load
+                        echo "$DOCKER_PASSWORD" | docker login \
+                            -u "$DOCKER_USERNAME" \
+                            --password-stdin
 
-                    echo "=== Loading trip-service:${IMAGE_TAG} into Minikube ==="
+                        echo "=== Pushing frontend image ==="
 
-                    docker save ${TRIP_IMAGE}:${IMAGE_TAG} | \
-                        docker exec -i minikube docker load
+                        docker push \
+                            ${DOCKER_REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG}
 
-                    echo "=== Verifying images in Minikube ==="
+                        echo "=== Pushing trip-service image ==="
 
-                    docker exec minikube docker images | \
-                        grep -E "frontend|trip-service"
+                        docker push \
+                            ${DOCKER_REGISTRY}/${TRIP_IMAGE}:${IMAGE_TAG}
 
-                    echo "=== Images successfully loaded ==="
-                '''
+                        echo "=== Docker Hub push successful ==="
+
+                        docker logout
+                    '''
+                }
             }
         }
 
-        stage('Update GitOps Manifest') {
+        stage('Update AWS GitOps Manifest') {
             steps {
                 sh '''
                     set -e
 
-                    echo "=== Updating Helm image tag ==="
+                    echo "=== Updating AWS Helm image tag ==="
 
                     sed -i \
                         "s/^  tag: .*/  tag: \\"${IMAGE_TAG}\\"/" \
-                        ${HELM_CHART}/values.yaml
+                        ${HELM_CHART}/values-aws.yaml
 
-                    echo "=== New image configuration ==="
+                    echo "=== Updating AI Planner timeout ==="
 
-                    grep -A2 "^image:" \
-                        ${HELM_CHART}/values.yaml
+                    sed -i \
+                        "s/^  timeout: .*/  timeout: ${AI_PLANNER_TIMEOUT}/" \
+                        ${HELM_CHART}/values-aws.yaml
+
+                    echo "=== AWS image configuration ==="
+
+                    grep -A3 "^image:" \
+                        ${HELM_CHART}/values-aws.yaml
+
+                    echo "=== AI Planner configuration ==="
+
+                    grep -A3 "^aiPlanner:" \
+                        ${HELM_CHART}/values-aws.yaml
 
                     echo "=== Git diff ==="
 
-                    git diff -- ${HELM_CHART}/values.yaml
+                    git diff -- ${HELM_CHART}/values-aws.yaml
                 '''
             }
         }
@@ -149,7 +177,9 @@ pipeline {
 
                     echo "=== Helm lint ==="
 
-                    helm lint ${HELM_CHART}
+                    helm lint \
+                        ${HELM_CHART} \
+                        -f ${HELM_CHART}/values-aws.yaml
 
                     echo "=== Helm template ==="
 
@@ -157,6 +187,7 @@ pipeline {
                         travel-planner \
                         ${HELM_CHART} \
                         --namespace ${NAMESPACE} \
+                        -f ${HELM_CHART}/values-aws.yaml \
                         > /tmp/helm-rendered.yaml
 
                     echo "=== Helm validation successful ==="
@@ -164,34 +195,37 @@ pipeline {
                     echo "=== Images in rendered manifests ==="
 
                     grep "image:" /tmp/helm-rendered.yaml
+
+                    echo "=== AI Planner timeout in rendered manifests ==="
+
+                    grep -R "AI_PLANNER_TIMEOUT" /tmp/helm-rendered.yaml || true
                 '''
             }
         }
 
         stage('Commit GitOps Change') {
             steps {
-                script {
-                    sh '''
-                        set -e
+                sh '''
+                    set -e
 
-                        git config user.name "Jenkins"
-                        git config user.email "jenkins@local"
+                    git config user.name "Jenkins"
+                    git config user.email "jenkins@local"
 
-                        git add ${HELM_CHART}/values.yaml
+                    git add ${HELM_CHART}/values-aws.yaml
 
-                        echo "=== Checking Git changes ==="
+                    echo "=== Checking Git changes ==="
 
-                        if git diff --cached --quiet; then
-                            echo "No GitOps changes to commit."
-                        else
-                            git commit \
-                                -m "chore: deploy TravelPlanner ${IMAGE_TAG}"
+                    if git diff --cached --quiet; then
+                        echo "No GitOps changes to commit."
+                    else
+                        git commit \
+                            -m "chore: deploy TravelPlanner ${IMAGE_TAG}"
 
-                            echo "=== Git commit created ==="
-                            git log -1 --oneline
-                        fi
-                    '''
-                }
+                        echo "=== Git commit created ==="
+
+                        git log -1 --oneline
+                    fi
+                '''
             }
         }
 
@@ -212,9 +246,11 @@ pipeline {
                         git branch -f ${GIT_BRANCH} HEAD
 
                         echo "=== Current branch ==="
+
                         git branch --show-current
 
                         echo "=== Current commit ==="
+
                         git rev-parse HEAD
 
                         echo "=== Configuring Git authentication ==="
@@ -257,12 +293,12 @@ EOF
                 sh '''
                     set -e
 
-                    echo "=== Waiting for Argo CD ==="
+                    echo "=== Waiting for Argo CD reconciliation ==="
 
-                    sleep 15
+                    sleep 20
 
-                    echo "=== Argo CD will reconcile the Git change ==="
-                    echo "=== Deployment is controlled by Argo CD ==="
+                    echo "=== GitOps deployment triggered ==="
+                    echo "=== Argo CD will deploy the new version to AWS K3s ==="
                 '''
             }
         }
@@ -271,26 +307,36 @@ EOF
     post {
 
         always {
-            echo "Jenkins CI pipeline finished."
+            echo "Jenkins CI/CD pipeline finished."
         }
 
         success {
-            echo "======================================"
-            echo " TravelPlanner CI SUCCESS"
-            echo "======================================"
-            echo " Frontend image: frontend:${IMAGE_TAG}"
-            echo " Trip image:     trip-service:${IMAGE_TAG}"
-            echo " GitOps change:  pushed to GitHub"
-            echo " Argo CD:        will deploy the change"
-            echo "======================================"
+            echo "=============================================="
+            echo " TravelPlanner AWS CI/CD SUCCESS"
+            echo "=============================================="
+            echo " Frontend image:"
+            echo " ${DOCKER_REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG}"
+            echo ""
+            echo " Trip-service image:"
+            echo " ${DOCKER_REGISTRY}/${TRIP_IMAGE}:${IMAGE_TAG}"
+            echo ""
+            echo " AI Planner timeout:"
+            echo " ${AI_PLANNER_TIMEOUT} seconds"
+            echo ""
+            echo " GitOps branch:"
+            echo " ${GIT_BRANCH}"
+            echo ""
+            echo " Argo CD:"
+            echo " deployment triggered"
+            echo "=============================================="
         }
 
         failure {
-            echo "======================================"
-            echo " TravelPlanner CI FAILED"
-            echo "======================================"
+            echo "=============================================="
+            echo " TravelPlanner AWS CI/CD FAILED"
+            echo "=============================================="
             echo " Check the Jenkins console output."
-            echo "======================================"
+            echo "=============================================="
         }
     }
 }

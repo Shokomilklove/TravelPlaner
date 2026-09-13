@@ -32,7 +32,7 @@ secrets:
 # secure tunnel/VPN endpoint that fronts it.
 aiPlanner:
   url: "http://host.docker.internal:5002"        # override with your tunnel URL
-  timeout: 120
+  timeout: 600
 
 # ---- Database -------------------------------------------------------------
 # In-cluster PostgreSQL — great for a self-contained cluster / staging.
