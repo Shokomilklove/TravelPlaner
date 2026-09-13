@@ -12,7 +12,7 @@ secrets:
 
 aiPlanner:
   url: "http://10.50.0.1:5002"
-  timeout: 120
+  timeout: 200
 
 postgres:
   enabled: false

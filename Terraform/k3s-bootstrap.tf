@@ -97,6 +97,87 @@ fi
 
 aws --version
 
+
+# ------------------------------------------------------------
+# 2.1 Install WireGuard
+# ------------------------------------------------------------
+
+echo "Installing WireGuard..."
+
+apt-get install -y \
+  wireguard \
+  wireguard-tools
+
+mkdir -p /etc/wireguard
+chmod 700 /etc/wireguard
+
+echo "WireGuard package installed."
+
+# ------------------------------------------------------------
+# Configure WireGuard
+# ------------------------------------------------------------
+echo "Configuring WireGuard..."
+
+mkdir -p /etc/wireguard
+chmod 700 /etc/wireguard
+
+# Generate AWS WireGuard keypair locally if it does not exist.
+if [ ! -f /etc/wireguard/aws-private.key ]; then
+  umask 077
+  wg genkey > /etc/wireguard/aws-private.key
+fi
+
+AWS_WG_PRIVATE_KEY=$(cat /etc/wireguard/aws-private.key)
+
+AWS_WG_PUBLIC_KEY=$(printf '%s' "$${AWS_WG_PRIVATE_KEY}" | wg pubkey)
+
+chmod 600 /etc/wireguard/aws-private.key
+
+# Publish ONLY the AWS public key to SSM.
+aws ssm put-parameter \
+  --region eu-central-1 \
+  --name "/travel-planner/wireguard/aws-public-key" \
+  --type "String" \
+  --value "$${AWS_WG_PUBLIC_KEY}" \
+  --overwrite
+
+echo "AWS WireGuard public key published to SSM."
+
+# Wait for Windows public key.
+until WINDOWS_WG_PUBLIC_KEY=$(
+  aws ssm get-parameter \
+    --region eu-central-1 \
+    --name "/travel-planner/wireguard/windows-public-key" \
+    --query "Parameter.Value" \
+    --output text 2>/dev/null
+) && [ -n "$${WINDOWS_WG_PUBLIC_KEY}" ] && \
+   [ "$${WINDOWS_WG_PUBLIC_KEY}" != "None" ]; do
+
+  echo "Waiting for Windows WireGuard public key..."
+  sleep 10
+done
+
+cat > /etc/wireguard/wg0.conf <<WGEOF
+[Interface]
+Address = 10.50.0.2/24
+ListenPort = 51820
+PrivateKey = $${AWS_WG_PRIVATE_KEY}
+
+[Peer]
+PublicKey = $${WINDOWS_WG_PUBLIC_KEY}
+AllowedIPs = 10.50.0.1/32
+PersistentKeepalive = 25
+WGEOF
+
+chmod 600 /etc/wireguard/wg0.conf
+
+systemctl enable wg-quick@wg0
+systemctl restart wg-quick@wg0
+
+echo "WireGuard configured successfully."
+wg show
+
+
 # ------------------------------------------------------------
 # 3. Install K3s
 # ------------------------------------------------------------
@@ -267,6 +348,26 @@ done
 echo "PostgreSQL password received from SSM."
 
 # ------------------------------------------------------------
+# 7.1 Wait for shared INTERNAL_API_TOKEN
+# ------------------------------------------------------------
+
+echo "Waiting for shared INTERNAL_API_TOKEN..."
+
+until INTERNAL_API_TOKEN=$(
+  aws ssm get-parameter \
+    --region ${var.aws_region} \
+    --name "/travel-planner/internal-api-token" \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --output text 2>/dev/null
+) && [ -n "$${INTERNAL_API_TOKEN}" ]; do
+
+  echo "INTERNAL_API_TOKEN not available yet..."
+  sleep 10
+done
+
+echo "Shared INTERNAL_API_TOKEN received."
+# ------------------------------------------------------------
 # 8. Create application Kubernetes Secret
 # ------------------------------------------------------------
 
@@ -279,7 +380,7 @@ kubectl create secret generic trip-service-secrets \
   --from-literal=POSTGRES_DB=travel \
   --from-literal=SECRET_KEY="$$(openssl rand -hex 32)" \
   --from-literal=JWT_SECRET_KEY="$$(openssl rand -hex 32)" \
-  --from-literal=INTERNAL_API_TOKEN="$$(openssl rand -hex 32)" \
+  --from-literal=INTERNAL_API_TOKEN="$${INTERNAL_API_TOKEN}" \
   --dry-run=client \
   -o yaml \
   | kubectl apply -f -

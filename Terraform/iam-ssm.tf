@@ -28,8 +28,8 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy" "password_parameter" {
-  name = "travel-planner-password-parameter"
+resource "aws_iam_role_policy" "travel_planner_parameters" {
+  name = "travel-planner-parameters"
   role = aws_iam_role.ssm.id
 
   policy = jsonencode({
@@ -44,7 +44,11 @@ resource "aws_iam_role_policy" "password_parameter" {
           "ssm:PutParameter"
         ]
 
-        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/travel-planner/postgres-password"
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:*:parameter/travel-planner/postgres-password",
+          "arn:aws:ssm:${var.aws_region}:*:parameter/travel-planner/internal-api-token",
+          "arn:aws:ssm:${var.aws_region}:*:parameter/travel-planner/wireguard/*"
+        ]
       }
     ]
   })
