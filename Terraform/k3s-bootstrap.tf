@@ -35,7 +35,6 @@ fi
 
 echo "Dedicated EBS volume detected: $${DATA_DISK}"
 
-# Format only if the disk has no filesystem
 if ! blkid "$${DATA_DISK}" >/dev/null 2>&1; then
   echo "Formatting $${DATA_DISK} as ext4..."
   mkfs.ext4 -F "$${DATA_DISK}"
@@ -43,10 +42,8 @@ fi
 
 mkdir -p /var/lib/rancher
 
-# Mount the EBS volume
 mount "$${DATA_DISK}" /var/lib/rancher
 
-# Persist mount across reboot
 DATA_UUID=$(
   blkid -s UUID -o value "$${DATA_DISK}"
 )
@@ -125,6 +122,28 @@ done
 
 /usr/local/bin/k3s kubectl get nodes
 
+echo "Waiting for Flannel network..."
+
+until [ -s /run/flannel/subnet.env ]; do
+  echo "Waiting for /run/flannel/subnet.env..."
+  sleep 5
+done
+
+echo "Flannel network is ready:"
+cat /run/flannel/subnet.env
+
+echo "Waiting for Kubernetes node to become Ready..."
+
+until /usr/local/bin/k3s kubectl get nodes \
+  -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' \
+  2>/dev/null | grep -q True; do
+
+  echo "Node is not Ready yet..."
+  sleep 5
+done
+
+echo "Kubernetes node is Ready."
+
 # ------------------------------------------------------------
 # 5. kubectl configuration
 # ------------------------------------------------------------
@@ -144,6 +163,75 @@ ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl
 echo "Kubernetes API is ready."
 
 # ------------------------------------------------------------
+# 5.1 Create application namespace FIRST
+# ------------------------------------------------------------
+
+echo "Creating travel-planner namespace..."
+
+kubectl create namespace travel-planner \
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
+
+echo "travel-planner namespace is ready."
+
+# ------------------------------------------------------------
+# 5.2 Configure CoreDNS for AWS private DNS
+# ------------------------------------------------------------
+
+echo "Configuring CoreDNS for travel-planner.internal..."
+
+kubectl apply -f - <<'COREDNS_EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  travel-planner.server: |
+    travel-planner.internal:53 {
+        errors
+        cache 30
+        forward . 10.0.0.2
+    }
+COREDNS_EOF
+
+echo "Restarting CoreDNS..."
+
+kubectl -n kube-system rollout restart deployment coredns
+
+kubectl -n kube-system rollout status deployment coredns \
+  --timeout=120s
+
+echo "CoreDNS private DNS configuration applied."
+
+# ------------------------------------------------------------
+# 5.3 Verify PostgreSQL private DNS
+# ------------------------------------------------------------
+
+echo "Testing PostgreSQL DNS resolution..."
+
+until kubectl run dns-test \
+  -n travel-planner \
+  --image=busybox:1.36 \
+  --restart=Never \
+  --rm \
+  --attach \
+  --quiet \
+  -- nslookup postgres.travel-planner.internal \
+  >/tmp/dns-test-result 2>&1; do
+
+  echo "PostgreSQL DNS is not ready yet..."
+  cat /tmp/dns-test-result || true
+
+  sleep 5
+done
+
+cat /tmp/dns-test-result
+
+echo "PostgreSQL DNS resolution works."
+
+# ------------------------------------------------------------
 # 6. Install Helm
 # ------------------------------------------------------------
 
@@ -158,16 +246,7 @@ fi
 helm version
 
 # ------------------------------------------------------------
-# 7. Create application namespace
-# ------------------------------------------------------------
-
-kubectl create namespace travel-planner \
-  --dry-run=client \
-  -o yaml \
-  | kubectl apply -f -
-
-# ------------------------------------------------------------
-# 8. Wait for PostgreSQL password in SSM
+# 7. Wait for PostgreSQL password in SSM
 # ------------------------------------------------------------
 
 echo "Waiting for PostgreSQL password..."
@@ -188,8 +267,10 @@ done
 echo "PostgreSQL password received from SSM."
 
 # ------------------------------------------------------------
-# 9. Create application Kubernetes Secret
+# 8. Create application Kubernetes Secret
 # ------------------------------------------------------------
+
+echo "Creating Kubernetes Secret..."
 
 kubectl create secret generic trip-service-secrets \
   --namespace travel-planner \
@@ -206,7 +287,7 @@ kubectl create secret generic trip-service-secrets \
 echo "Kubernetes application secret created."
 
 # ------------------------------------------------------------
-# 10. Helm repositories
+# 9. Install Helm repositories
 # ------------------------------------------------------------
 
 echo "Adding Helm repositories..."
@@ -222,16 +303,15 @@ helm repo add prometheus-community \
 helm repo add grafana \
   https://grafana.github.io/helm-charts \
   || true
-echo 'Adding Helm repositories...'
 
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo add grafana-community https://grafana-community.github.io/helm-charts
+helm repo add grafana-community \
+  https://grafana-community.github.io/helm-charts \
+  || true
 
 helm repo update
 
 # ------------------------------------------------------------
-# 11. Install Argo CD
+# 10. Install Argo CD
 # ------------------------------------------------------------
 
 echo "Installing Argo CD..."
@@ -250,7 +330,7 @@ helm upgrade --install argocd argo/argo-cd \
 echo "Argo CD installed."
 
 # ------------------------------------------------------------
-# 11.1 Wait for Argo CD controllers
+# 10.1 Wait for Argo CD controllers
 # ------------------------------------------------------------
 
 echo "Waiting for Argo CD to become ready..."
@@ -270,7 +350,7 @@ kubectl rollout status deployment/argocd-applicationset-controller \
 echo "Argo CD is ready."
 
 # ------------------------------------------------------------
-# 12. Install Prometheus + Grafana + Alertmanager
+# 11. Install Prometheus + Grafana + Alertmanager
 # ------------------------------------------------------------
 
 echo "Installing monitoring stack..."
@@ -337,7 +417,7 @@ fi
 echo "Prometheus/Grafana/Alertmanager installed."
 
 # ------------------------------------------------------------
-# 12.1 Verify monitoring
+# 11.1 Verify monitoring
 # ------------------------------------------------------------
 
 echo "Waiting for monitoring pods..."
@@ -345,12 +425,15 @@ echo "Waiting for monitoring pods..."
 kubectl get pods -n monitoring
 
 # ------------------------------------------------------------
-# 13. Install Loki
+# 12. Install Loki
 # ------------------------------------------------------------
 
-echo 'Installing Loki...'
+echo "Installing Loki..."
 
-kubectl create namespace loki --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace loki \
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
 
 helm upgrade --install loki grafana-community/loki \
   --namespace loki \
@@ -392,8 +475,10 @@ helm upgrade --install loki grafana-community/loki \
   --wait \
   --timeout 15m
 
+echo "Loki installed."
+
 # ------------------------------------------------------------
-# 14. Install Grafana Alloy
+# 13. Install Grafana Alloy
 # ------------------------------------------------------------
 
 echo "Installing Grafana Alloy..."
@@ -413,7 +498,7 @@ helm upgrade --install alloy \
 echo "Grafana Alloy installed."
 
 # ------------------------------------------------------------
-# 15. Wait for Argo CD Application CRD
+# 14. Wait for Argo CD Application CRD
 # ------------------------------------------------------------
 
 echo "Waiting for Argo CD Application CRD..."
@@ -426,7 +511,7 @@ done
 echo "Argo CD Application CRD is ready."
 
 # ------------------------------------------------------------
-# 16. Create Argo CD Application
+# 15. Create Argo CD Application
 # ------------------------------------------------------------
 
 echo "Creating Argo CD Application..."
@@ -471,7 +556,7 @@ rm -f /tmp/travel-planner-argocd.yaml
 echo "Argo CD Application created."
 
 # ------------------------------------------------------------
-# 17. Verify installation
+# 16. Verify installation
 # ------------------------------------------------------------
 
 echo "=========================================="
@@ -484,11 +569,18 @@ kubectl get nodes -o wide
 echo "--- Namespaces ---"
 kubectl get namespaces
 
+echo "--- CoreDNS ---"
+kubectl get configmap coredns-custom -n kube-system
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+
 echo "--- Argo CD ---"
 kubectl get pods -n argocd
 
 echo "--- Monitoring ---"
 kubectl get pods -n monitoring
+
+echo "--- Loki ---"
+kubectl get pods -n loki
 
 echo "--- Alloy ---"
 kubectl get pods -n alloy

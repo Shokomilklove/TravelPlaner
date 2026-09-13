@@ -11,7 +11,7 @@ secrets:
   existingSecret: "trip-service-secrets"
 
 aiPlanner:
-  url: "http://CHANGE_ME:5002"
+  url: "http://10.50.0.1:5002"
   timeout: 120
 
 postgres:

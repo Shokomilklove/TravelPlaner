@@ -3,6 +3,7 @@ resource "aws_iam_role" "ssm" {
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
@@ -44,6 +45,40 @@ resource "aws_iam_role_policy" "password_parameter" {
         ]
 
         Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/travel-planner/postgres-password"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "route53_read" {
+  name = "travel-planner-route53-read"
+  role = aws_iam_role.ssm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "ListHostedZones"
+        Effect = "Allow"
+
+        Action = [
+          "route53:ListHostedZones",
+          "route53:ListHostedZonesByName"
+        ]
+
+        Resource = "*"
+      },
+      {
+        Sid    = "ReadHostedZoneRecords"
+        Effect = "Allow"
+
+        Action = [
+          "route53:GetHostedZone",
+          "route53:ListResourceRecordSets"
+        ]
+
+        Resource = "*"
       }
     ]
   })
