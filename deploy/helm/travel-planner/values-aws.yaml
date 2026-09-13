@@ -3,7 +3,7 @@ logLevel: INFO
 
 image:
   registry: "docker.io/shokomilklove"
-  tag: "1.0.0"
+  tag: "2"
   pullPolicy: IfNotPresent
 
 secrets:
@@ -12,7 +12,7 @@ secrets:
 
 aiPlanner:
   url: "http://10.50.0.1:5002"
-  timeout: 500
+  timeout: 300
 
 postgres:
   enabled: false
