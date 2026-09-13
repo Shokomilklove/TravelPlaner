@@ -52,7 +52,7 @@ certIssuer:
   create: false
 
 serviceMonitor:
-  enabled: false
+  enabled: true
 
 networkPolicy:
   enabled: false
