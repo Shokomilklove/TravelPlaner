@@ -42,7 +42,7 @@ class Config:
 
     # --- Generation tuning ---
     AI_TIMEOUT = float(
-        os.environ.get("AI_TIMEOUT", "90")
+        os.environ.get("AI_TIMEOUT", "500")
     )
 
     AI_TEMPERATURE = float(

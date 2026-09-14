@@ -7,7 +7,7 @@ workers = int(os.environ.get("GUNICORN_WORKERS", multiprocessing.cpu_count() * 2
 threads = int(os.environ.get("GUNICORN_THREADS", "2"))
 worker_class = "gthread"
 # Generous timeout: LLM calls can take a while.
-timeout = int(os.environ.get("GUNICORN_TIMEOUT", "180"))
+timeout = int(os.environ.get("GUNICORN_TIMEOUT", "500"))
 accesslog = "-"
 errorlog = "-"
 loglevel = os.environ.get("LOG_LEVEL", "info").lower()

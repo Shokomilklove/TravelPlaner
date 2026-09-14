@@ -3,12 +3,12 @@ resource "aws_instance" "k3s" {
   instance_type = "m7i-flex.large"
 
   subnet_id                   = aws_subnet.public.id
-  vpc_security_group_ids     = [aws_security_group.k3s.id]
+  vpc_security_group_ids      = [aws_security_group.k3s.id]
   associate_public_ip_address = true
 
   iam_instance_profile = aws_iam_instance_profile.ssm.name
 
-  user_data_base64 = base64gzip(local.k3s_bootstrap)
+  user_data_base64            = base64gzip(local.k3s_bootstrap)
   user_data_replace_on_change = true
 
   tags = {

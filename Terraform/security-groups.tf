@@ -21,15 +21,6 @@ resource "aws_security_group" "k3s" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # WireGuard VPN
-  ingress {
-    description = "TravelPlanner WireGuard VPN"
-    from_port   = 51820
-    to_port     = 51820
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   # K3s API — НЕ открываем в Internet.
   # Администрирование через AWS SSM.
 

@@ -114,28 +114,48 @@ chmod 700 /etc/wireguard
 echo "WireGuard package installed."
 
 # ------------------------------------------------------------
+# Configure IP forwarding
+# ------------------------------------------------------------
+
+echo "Enabling IP forwarding..."
+
+cat > /etc/sysctl.d/99-travel-planner-wireguard.conf <<'SYSCTLEOF'
+net.ipv4.ip_forward=1
+SYSCTLEOF
+
+sysctl --system
+
+echo "IP forwarding enabled."
+
+# ------------------------------------------------------------
 # Configure WireGuard
 # ------------------------------------------------------------
+
 echo "Configuring WireGuard..."
 
-mkdir -p /etc/wireguard
-chmod 700 /etc/wireguard
-
-# Generate AWS WireGuard keypair locally if it does not exist.
+# Generate AWS WireGuard private key only once.
 if [ ! -f /etc/wireguard/aws-private.key ]; then
   umask 077
   wg genkey > /etc/wireguard/aws-private.key
 fi
 
-AWS_WG_PRIVATE_KEY=$(cat /etc/wireguard/aws-private.key)
-
-AWS_WG_PUBLIC_KEY=$(printf '%s' "$${AWS_WG_PRIVATE_KEY}" | wg pubkey)
-
 chmod 600 /etc/wireguard/aws-private.key
 
-# Publish ONLY the AWS public key to SSM.
+AWS_WG_PRIVATE_KEY=$(cat /etc/wireguard/aws-private.key)
+
+AWS_WG_PUBLIC_KEY=$(
+  printf '%s' "$${AWS_WG_PRIVATE_KEY}" | wg pubkey
+)
+
+echo "AWS WireGuard public key generated."
+
+
+# ------------------------------------------------------------
+# Publish AWS public key to SSM
+# ------------------------------------------------------------
+
 aws ssm put-parameter \
-  --region eu-central-1 \
+  --region ${var.aws_region} \
   --name "/travel-planner/wireguard/aws-public-key" \
   --type "String" \
   --value "$${AWS_WG_PUBLIC_KEY}" \
@@ -143,19 +163,47 @@ aws ssm put-parameter \
 
 echo "AWS WireGuard public key published to SSM."
 
-# Wait for Windows public key.
-until WINDOWS_WG_PUBLIC_KEY=$(
-  aws ssm get-parameter \
-    --region eu-central-1 \
-    --name "/travel-planner/wireguard/windows-public-key" \
-    --query "Parameter.Value" \
-    --output text 2>/dev/null
-) && [ -n "$${WINDOWS_WG_PUBLIC_KEY}" ] && \
-   [ "$${WINDOWS_WG_PUBLIC_KEY}" != "None" ]; do
 
-  echo "Waiting for Windows WireGuard public key..."
+# ------------------------------------------------------------
+# Wait for Windows public key
+# ------------------------------------------------------------
+
+echo "Waiting for Windows WireGuard public key..."
+
+WINDOWS_WG_PUBLIC_KEY=""
+
+for i in $(seq 1 180); do
+
+  WINDOWS_WG_PUBLIC_KEY=$(
+    aws ssm get-parameter \
+      --region ${var.aws_region} \
+      --name "/travel-planner/wireguard/windows-public-key" \
+      --query "Parameter.Value" \
+      --output text 2>/dev/null || true
+  )
+
+  if [ -n "$${WINDOWS_WG_PUBLIC_KEY}" ] && \
+     [ "$${WINDOWS_WG_PUBLIC_KEY}" != "None" ]; then
+
+    echo "Windows WireGuard public key received."
+    break
+  fi
+
+  echo "Waiting for Windows public key... attempt $${i}/180"
   sleep 10
 done
+
+if [ -z "$${WINDOWS_WG_PUBLIC_KEY}" ] || \
+   [ "$${WINDOWS_WG_PUBLIC_KEY}" = "None" ]; then
+
+  echo "ERROR: Windows WireGuard public key was not found in SSM."
+  exit 1
+fi
+
+
+# ------------------------------------------------------------
+# Create WireGuard configuration
+# ------------------------------------------------------------
 
 cat > /etc/wireguard/wg0.conf <<WGEOF
 [Interface]
@@ -171,12 +219,21 @@ WGEOF
 
 chmod 600 /etc/wireguard/wg0.conf
 
+echo "WireGuard configuration created."
+
+# ------------------------------------------------------------
+# Start WireGuard
+# ------------------------------------------------------------
+
 systemctl enable wg-quick@wg0
 systemctl restart wg-quick@wg0
 
-echo "WireGuard configured successfully."
+sleep 2
+
+echo "WireGuard status:"
 wg show
 
+echo "WireGuard configured successfully."
 
 # ------------------------------------------------------------
 # 3. Install K3s
